@@ -1,0 +1,17 @@
+{
+  "domain": "curieri_romania",
+  "name": "Curieri Romania",
+  "codeowners": [
+    "@HAForgeLabs"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "panel_custom"
+  ],
+  "documentation": "https://github.com/HAForgeLabs/curieri-romania",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/HAForgeLabs/curieri-romania/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

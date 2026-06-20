@@ -1,0 +1,165 @@
+{
+  "title": "Curieri Romania",
+  "config": {
+    "step": {
+      "admin": {
+        "title": "Curieri Romania Administration",
+        "description": "This installs the Curieri Romania administration area. After installation, you can add courier services at any time from Integrations -> Add hub -> Curieri Romania.",
+        "data": {}
+      },
+      "service": {
+        "title": "Add courier service",
+        "description": "Choose the courier service you want to add. You can return anytime to Integrations -> Add hub -> Curieri Romania to add another courier.",
+        "data": {
+          "courier": "Courier"
+        }
+      },
+      "unsupported": {
+        "title": "Courier in preparation",
+        "description": "{courier} is prepared in the architecture, but authentication and polling are not enabled yet in this version. Return and choose Sameday for the current test."
+      },
+      "sameday_oauth": {
+        "title": "Sameday authentication",
+        "description": "Advanced method: copy the Sameday authentication link, open it in your browser and log in on the official Sameday page. After authentication, copy the final browser URL and paste it below.",
+        "data": {
+          "authorization_url": "Sameday authentication link",
+          "callback_url": "Final URL after authentication"
+        }
+      },
+      "fan_credentials": {
+        "title": "FAN Courier authentication",
+        "description": "Enter your FAN Courier account credentials. The mobile app key is included internally, and the credentials are used only to query your FAN Courier account.",
+        "data": {
+          "fan_username": "Username / email FAN Courier",
+          "fan_password": "FAN Courier password"
+        }
+      },
+      "cargus_credentials": {
+        "title": "Cargus authentication",
+        "description": "Advanced method: confirm the phone and paste the Cargus refresh token. For normal use, go back and choose Cargus email and password.",
+        "data": {
+          "cargus_phone": "Cargus account phone",
+          "cargus_refresh_token": "Refresh token Cargus"
+        }
+      },
+      "sameday_auth_method": {
+        "title": "Sameday authentication",
+        "description": "Choose the Sameday authentication method. Recommended: phone and password. The password is only used to obtain the refresh token and is not saved. The helper/bookmarklet remains available as an advanced method.",
+        "data": {
+          "sameday_auth_method": "Sameday authentication method"
+        }
+      },
+      "sameday_refresh_token": {
+        "title": "Sameday authentication with helper",
+        "description": "Advanced method: paste the Sameday refresh token copied with the helper. For normal use, go back and choose Sameday phone and password.",
+        "data": {
+          "sameday_refresh_token": "Sameday refresh token"
+        }
+      },
+      "sameday_helper": {
+        "title": "Sameday token helper",
+        "description": "Press the Home Assistant button to open the local Sameday helper. In the helper, drag the bookmarklet to the bookmarks bar, open Sameday, sign in, and press the bookmarklet. The token will be copied to the clipboard. Return to the helper page, press `Continue in Home Assistant`, then paste the token in the next form."
+      },
+      "cargus_helper": {
+        "title": "Cargus token helper",
+        "description": "Press the Home Assistant button to open the local Cargus helper. In the helper, drag the bookmarklet to the bookmarks bar, open MyCargus, sign in, and press the bookmarklet. The token will be copied to the clipboard. Return to the helper page, press `Continue in Home Assistant`, then paste the token in the next form."
+      },
+      "cargus_phone": {
+        "title": "Cargus account phone",
+        "description": "Advanced helper/bookmarklet method: enter the phone exactly as shown in the MyCargus account. Usually the format is +40... The helper will open in the next step.",
+        "data": {
+          "cargus_phone": "Cargus account phone"
+        }
+      },
+      "gls_credentials": {
+        "title": "GLS beta authentication",
+        "description": "Advanced method: paste the GLS refresh token. For normal usage, go back and choose GLS email and password.",
+        "data": {
+          "gls_refresh_token": "GLS refresh token"
+        }
+      },
+      "gls_auth_method": {
+        "title": "GLS beta authentication",
+        "description": "Choose the GLS authentication method. Recommended: email and password. The password is used only to obtain the refresh token and is not saved.",
+        "data": {
+          "gls_auth_method": "GLS authentication method"
+        }
+      },
+      "gls_oauth": {
+        "title": "GLS browser authentication - diagnostic",
+        "description": "Diagnostic method: copy the authentication URL, open it in a browser and log in to GLS. At the end, the browser may show an error for the msauth:// address. Copy the final full URL and paste it in the Callback URL field.",
+        "data": {
+          "authorization_url": "GLS authentication URL",
+          "callback_url": "Final callback URL"
+        }
+      },
+      "gls_login": {
+        "title": "GLS authentication",
+        "description": "Enter your GLS account email and password. The integration automatically obtains a refresh token through the official Azure B2C/MSAL flow. The password is not saved after setup.",
+        "data": {
+          "gls_email": "GLS email",
+          "gls_password": "GLS password"
+        }
+      },
+      "cargus_auth_method": {
+        "title": "Cargus authentication",
+        "description": "Choose the Cargus authentication method. Recommended: email and password. The password is only used to obtain the refresh token and is not saved. The helper/bookmarklet remains available as an advanced method.",
+        "data": {
+          "cargus_auth_method": "Cargus authentication method"
+        }
+      },
+      "cargus_login": {
+        "title": "Cargus authentication",
+        "description": "Enter the phone, email and password for the Cargus account. The phone must match the MyCargus account, usually in +40... format. The integration obtains the refresh token automatically through Azure B2C. The password is not saved after setup.",
+        "data": {
+          "cargus_phone": "Cargus account phone",
+          "cargus_email": "Cargus email",
+          "cargus_password": "Cargus password"
+        }
+      },
+      "sameday_login": {
+        "title": "Sameday authentication",
+        "description": "Enter the phone number and password for the Sameday account. The integration obtains the refresh token automatically through Sameday Identity. The password is not saved after setup.",
+        "data": {
+          "sameday_phone": "Sameday phone number",
+          "sameday_password": "Sameday password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Sameday cannot be contacted or authentication is not accepted. Check Home Assistant logs for [SAMEDAY AUTH DIAG].",
+      "missing_code": "The entered URL does not contain the authentication code.",
+      "invalid_state": "The authentication session does not match. Restart the process.",
+      "unsupported_courier": "The selected courier is not active yet in this version.",
+      "invalid_auth": "Sameday authentication failed. Check the phone number, password, or refresh token.",
+      "required": "Required field.",
+      "invalid_auth_fan": "FAN Courier authentication failed. Check the username and password.",
+      "cannot_connect_fan": "FAN Courier cannot be reached right now. It can be retried automatically or manually.",
+      "invalid_auth_cargus": "Cargus authentication failed. Check the email, password, phone or refresh token.",
+      "cannot_connect_cargus": "Cargus cannot be reached or the authentication is not accepted. Check Home Assistant logs for [CARGUS AUTH DIAG].",
+      "invalid_auth_gls": "GLS authentication failed. Check the email and password or refresh token.",
+      "cannot_connect_gls": "GLS cannot be reached right now or the authentication flow was not accepted. Check Home Assistant logs for [GLS AUTH DIAG]."
+    },
+    "abort": {
+      "already_configured": "This entry is already configured. To reconnect, remove the existing entry and add it again."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_parcels": {
+        "name": "Active parcels"
+      },
+      "problem_parcels": {
+        "name": "Problem parcels"
+      },
+      "delivered_parcels": {
+        "name": "Delivered parcels"
+      }
+    },
+    "button": {
+      "add_service": {
+        "name": "Add service"
+      }
+    }
+  }
+}

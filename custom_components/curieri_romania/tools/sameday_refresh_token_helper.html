@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Curieri Romania - helper token Sameday</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 960px; margin: 32px auto; padding: 0 16px; line-height: 1.5; color: #222; }
+    .card { border: 1px solid #ddd; border-radius: 14px; padding: 18px; background: #fafafa; margin-bottom: 18px; }
+    .step { display:flex; gap:12px; align-items:flex-start; margin:12px 0; }
+    .num { width:28px; height:28px; border-radius:50%; background:#0b57d0; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:bold; flex:0 0 auto; }
+    .bookmark { display: inline-block; padding: 12px 16px; background: #0b57d0; color: white; border-radius: 10px; text-decoration: none; font-weight: bold; cursor: grab; }
+    .btn { display: inline-block; padding: 10px 14px; background: #222; color: #fff; border: 0; border-radius: 8px; cursor: pointer; margin-right: 8px; text-decoration:none; }
+    .btn-primary { background:#0b57d0; }
+    .muted { color: #666; } .ok { color: #176b2c; font-weight: bold; } .warn { color:#9a5b00; }
+    textarea { width: 100%; min-height: 170px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 8px; padding: 10px; font-family: Consolas, Monaco, monospace; }
+    code { font-family: Consolas, Monaco, monospace; }
+  </style>
+</head>
+<body>
+  <h1>Curieri Romania - helper token Sameday</h1>
+  <p>Acest helper te ajuta sa conectezi Sameday in Home Assistant fara sa cauti manual tokenul in DevTools.</p>
+
+  <div class="card">
+    <h2>Pasi recomandati</h2>
+    <div class="step"><span class="num">1</span><div>Trage butonul acesta in bara de bookmarks/favorite: <a id="bookmarklet-link" class="bookmark" href="#">Extrage token Sameday</a><br><span class="muted">Acest pas se face o singura data pentru browserul curent.</span></div></div>
+    <div class="step"><span class="num">2</span><div>Apasa aici pentru portalul oficial: <a class="btn" href="https://sameday.ro/trimite-colete" target="_blank" rel="noopener">Deschide Sameday</a></div></div>
+    <div class="step"><span class="num">3</span><div>Autentifica-te in portal, apoi apasa bookmarkletul <strong>Extrage token Sameday</strong> din bara de favorite. Tokenul va fi copiat in clipboard si afisat pe pagina curierului.</div></div>
+    <div class="step"><span class="num">4</span><div>Revino in aceasta pagina helper si apasa: <button id="continue-ha" class="btn btn-primary" type="button">Continua in Home Assistant</button><br><span class="muted">Apoi lipeste tokenul copiat in formularul Home Assistant.</span></div></div>
+    <p id="status" class="ok"></p>
+  </div>
+
+  <div class="card">
+    <h2>Varianta alternativa</h2>
+    <p class="muted">Daca nu poti trage butonul in bara de favorite, creeaza manual un bookmark nou si pune codul de mai jos la URL/adresa.</p>
+    <button id="copy-code" class="btn" type="button">Copiaza codul bookmarklet</button>
+    <span id="copy-status" class="muted"></span>
+    <p><textarea id="bookmarklet-code" readonly></textarea></p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const flowId = params.get("flow_id") || "";
+    const doneUrl = `${window.location.origin}/api/curieri_romania/external_step_done?flow_id=${encodeURIComponent(flowId)}`;
+    const bookmarkletSource = "(function(){\n\n  function esc(v){return String(v==null?\"\":v).replace(/[&<>\"']/g,function(c){return {\"&\":\"&amp;\",\"<\":\"&lt;\",\">\":\"&gt;\",\"\\\"\":\"&quot;\",\"'\":\"&#39;\"}[c]||c;});}\n  function copyToken(token, statusEl){\n    function done(){ if(statusEl) statusEl.textContent=\"Token copiat in clipboard. Revino in pagina helperului si apasa Continua in Home Assistant.\"; }\n    if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(token).then(done).catch(done);}\n    else { try{document.execCommand(\"copy\");}catch(e){} done(); }\n  }\n  function showBox(token){\n    var old=document.getElementById(\"cr-token-helper-overlay\"); if(old) old.remove();\n    var overlay=document.createElement(\"div\");\n    overlay.id=\"cr-token-helper-overlay\";\n    overlay.style.cssText=\"position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);font-family:Arial,sans-serif;color:#111\";\n    var box=document.createElement(\"div\");\n    box.style.cssText=\"max-width:760px;margin:6vh auto;background:#fff;border-radius:14px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35)\";\n    box.innerHTML='<h2 style=\"margin:0 0 10px;font-size:20px\">Curieri Romania - token Sameday</h2>'+ \n      '<p style=\"margin:0 0 12px;color:#444\">Refresh tokenul a fost gasit si copiat in clipboard. Revino in pagina helperului Curieri Romania, apasa <b>Continua in Home Assistant</b>, apoi lipeste tokenul in formular.</p>'+ \n      '<textarea id=\"cr-token-helper-value\" readonly style=\"width:100%;height:150px;box-sizing:border-box;font-family:monospace;font-size:12px;border:1px solid #ccc;border-radius:8px;padding:10px\">'+esc(token)+'</textarea>'+ \n      '<div style=\"display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap\">'+\n      '<button id=\"cr-token-helper-copy\" style=\"padding:10px 14px;border:0;border-radius:8px;background:#0b57d0;color:#fff;cursor:pointer\">Copiaza din nou tokenul</button>'+ \n      '<button id=\"cr-token-helper-close\" style=\"padding:10px 14px;border:1px solid #bbb;border-radius:8px;background:#fff;cursor:pointer\">Inchide</button>'+ \n      '<span id=\"cr-token-helper-status\" style=\"color:#444\"></span></div>'+ \n      '<p style=\"margin:12px 0 0;color:#777;font-size:12px\">Tokenul este citit local din pagina curierului si nu este trimis automat nicaieri.</p>';\n    overlay.appendChild(box); document.body.appendChild(overlay);\n    var ta=document.getElementById(\"cr-token-helper-value\"); var st=document.getElementById(\"cr-token-helper-status\");\n    ta.focus(); ta.select();\n    document.getElementById(\"cr-token-helper-copy\").onclick=function(){copyToken(token, st);};\n    document.getElementById(\"cr-token-helper-close\").onclick=function(){overlay.remove();};\n    copyToken(token, st);\n  }\n\n\n  function findToken(){\n    var key = \"oidc.user:https://identity.sameday.ro/:Mobile_Web_Client\";\n    var raw = sessionStorage.getItem(key);\n    if (raw) {\n      try {\n        var obj = JSON.parse(raw);\n        if (obj && obj.refresh_token) return obj.refresh_token;\n      } catch(e) {}\n    }\n    for (var i=0;i<sessionStorage.length;i++){\n      var k=sessionStorage.key(i)||\"\";\n      if (k.toLowerCase().indexOf(\"oidc.user\") === -1) continue;\n      try {\n        var item=JSON.parse(sessionStorage.getItem(k)||\"{}\");\n        if (item && item.refresh_token) return item.refresh_token;\n      } catch(e) {}\n    }\n    return \"\";\n  }\n\n  if(location.hostname.toLowerCase()!==\"sameday.ro\"){alert(\"Deschide mai intai https://sameday.ro/trimite-colete, autentifica-te, apoi apasa bookmarkletul.\"); return;}\n  var token=findToken();\n  if(!token){alert(\"Nu am gasit refresh token. Verifica daca esti logat, reincarca pagina si incearca din nou.\"); return;}\n  showBox(token);\n})();";
+    const BOOKMARKLET_CODE = "javascript:" + bookmarkletSource;
+    const link = document.getElementById("bookmarklet-link");
+    const textarea = document.getElementById("bookmarklet-code");
+    const status = document.getElementById("status");
+    const copyStatus = document.getElementById("copy-status");
+    link.href = BOOKMARKLET_CODE;
+    textarea.value = BOOKMARKLET_CODE;
+    status.textContent = flowId ? "Helperul este conectat la configurarea curenta Home Assistant." : "Helper deschis din panel. Tokenul va fi copiat manual.";
+    document.getElementById("continue-ha").addEventListener("click", () => {
+      if (!flowId) { alert("Acest helper nu este legat de un config flow activ. Deschide-l din configurarea integrarii."); return; }
+      window.location.href = doneUrl;
+    });
+    document.getElementById("copy-code").addEventListener("click", async () => {
+      textarea.focus(); textarea.select();
+      try { await navigator.clipboard.writeText(BOOKMARKLET_CODE); copyStatus.textContent = "Cod copiat in clipboard."; }
+      catch (err) { document.execCommand("copy"); copyStatus.textContent = "Cod selectat/copiat. Daca nu s-a copiat automat, foloseste Ctrl+C."; }
+    });
+  </script>
+</body>
+</html>

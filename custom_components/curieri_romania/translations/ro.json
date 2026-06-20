@@ -1,0 +1,165 @@
+{
+  "title": "Curieri Romania",
+  "config": {
+    "step": {
+      "admin": {
+        "title": "Administrare Curieri Romania",
+        "description": "Se va instala zona de administrare Curieri Romania. Dupa instalare, vei putea adauga oricand servicii de curierat din Integrari -> Adauga hub -> Curieri Romania.",
+        "data": {}
+      },
+      "service": {
+        "title": "Adauga serviciu de curierat",
+        "description": "Alege curierul pe care vrei sa il adaugi. Poti reveni oricand la Integrari -> Adauga hub -> Curieri Romania pentru a adauga un alt curier.",
+        "data": {
+          "courier": "Curier"
+        }
+      },
+      "unsupported": {
+        "title": "Curier in pregatire",
+        "description": "{courier} este pregatit in arhitectura, dar autentificarea si interogarea nu sunt inca activate in aceasta versiune. Revino si alege Sameday pentru testul curent."
+      },
+      "sameday_oauth": {
+        "title": "Autentificare Sameday",
+        "description": "Metoda avansata: copiaza linkul de autentificare Sameday, deschide-l in browser si logheaza-te pe pagina oficiala Sameday. Dupa autentificare, copiaza URL-ul final din bara browserului si lipeste-l in campul de mai jos.",
+        "data": {
+          "authorization_url": "Link autentificare Sameday",
+          "callback_url": "URL final dupa autentificare"
+        }
+      },
+      "fan_credentials": {
+        "title": "Autentificare FAN Courier",
+        "description": "Introdu datele contului FAN Courier. Cheia aplicatiei mobile este inclusa intern, iar datele sunt folosite doar pentru interogarea contului tau FAN Courier.",
+        "data": {
+          "fan_username": "Username / email FAN Courier",
+          "fan_password": "Parola FAN Courier"
+        }
+      },
+      "cargus_credentials": {
+        "title": "Autentificare Cargus",
+        "description": "Metoda avansata: verifica telefonul si lipeste aici refresh tokenul Cargus. Pentru utilizare normala, revino si alege email si parola Cargus.",
+        "data": {
+          "cargus_phone": "Telefon cont Cargus",
+          "cargus_refresh_token": "Refresh token Cargus"
+        }
+      },
+      "sameday_auth_method": {
+        "title": "Autentificare Sameday",
+        "description": "Alege metoda de autentificare Sameday. Recomandat: telefon si parola. Parola este folosita doar pentru obtinerea refresh tokenului si nu este salvata. Helperul/bookmarkletul ramane disponibil ca metoda avansata.",
+        "data": {
+          "sameday_auth_method": "Metoda autentificare Sameday"
+        }
+      },
+      "sameday_refresh_token": {
+        "title": "Autentificare Sameday cu helper",
+        "description": "Metoda avansata: lipeste aici refresh tokenul Sameday copiat cu helperul. Pentru utilizare normala, revino si alege telefon si parola Sameday.",
+        "data": {
+          "sameday_refresh_token": "Refresh token Sameday"
+        }
+      },
+      "sameday_helper": {
+        "title": "Helper token Sameday",
+        "description": "Apasa butonul Home Assistant pentru a deschide helperul local Sameday. In helper tragi bookmarkletul in bara de favorite, deschizi Sameday, te autentifici si apesi bookmarkletul. Tokenul va fi copiat in clipboard. Revino in pagina helperului si apasa `Continua in Home Assistant`, apoi lipeste tokenul in formularul urmator."
+      },
+      "cargus_helper": {
+        "title": "Helper token Cargus",
+        "description": "Apasa butonul Home Assistant pentru a deschide helperul local Cargus. In helper tragi bookmarkletul in bara de favorite, deschizi MyCargus, te autentifici si apesi bookmarkletul. Tokenul va fi copiat in clipboard. Revino in pagina helperului si apasa `Continua in Home Assistant`, apoi lipeste tokenul in formularul urmator."
+      },
+      "cargus_phone": {
+        "title": "Telefon cont Cargus",
+        "description": "Metoda avansata cu helper/bookmarklet: introdu telefonul exact asa cum apare in contul MyCargus. De obicei formatul este +40... Dupa acest pas se va deschide helperul pentru preluarea refresh tokenului.",
+        "data": {
+          "cargus_phone": "Telefon cont Cargus"
+        }
+      },
+      "gls_credentials": {
+        "title": "Autentificare GLS beta",
+        "description": "Metoda avansata: lipeste refresh tokenul GLS. Pentru utilizare normala, revino si alege email si parola GLS.",
+        "data": {
+          "gls_refresh_token": "Refresh token GLS"
+        }
+      },
+      "gls_auth_method": {
+        "title": "Autentificare GLS beta",
+        "description": "Alege metoda de autentificare GLS. Recomandat: email si parola. Parola este folosita doar pentru obtinerea refresh tokenului si nu este salvata.",
+        "data": {
+          "gls_auth_method": "Metoda autentificare GLS"
+        }
+      },
+      "gls_oauth": {
+        "title": "Autentificare GLS prin browser - diagnostic",
+        "description": "Metoda de diagnostic: copiaza URL-ul de autentificare, deschide-l intr-un browser si autentifica-te in contul GLS. La final browserul poate afisa o eroare pentru adresa msauth://. Copiaza URL-ul final complet din bara de adrese si lipeste-l in campul Callback URL.",
+        "data": {
+          "authorization_url": "URL autentificare GLS",
+          "callback_url": "Callback URL final"
+        }
+      },
+      "gls_login": {
+        "title": "Autentificare GLS",
+        "description": "Introdu emailul si parola contului GLS. Integrarea obtine automat refresh tokenul prin fluxul oficial Azure B2C/MSAL. Parola nu este salvata dupa configurare.",
+        "data": {
+          "gls_email": "Email GLS",
+          "gls_password": "Parola GLS"
+        }
+      },
+      "cargus_auth_method": {
+        "title": "Autentificare Cargus",
+        "description": "Alege metoda de autentificare Cargus. Recomandat: email si parola. Parola este folosita doar pentru obtinerea refresh tokenului si nu este salvata. Helperul/bookmarkletul ramane disponibil ca metoda avansata.",
+        "data": {
+          "cargus_auth_method": "Metoda autentificare Cargus"
+        }
+      },
+      "cargus_login": {
+        "title": "Autentificare Cargus",
+        "description": "Introdu telefonul, emailul si parola contului Cargus. Telefonul trebuie sa fie cel din contul MyCargus, de obicei in format +40... Integrarea obtine automat refresh tokenul prin Azure B2C. Parola nu este salvata dupa configurare.",
+        "data": {
+          "cargus_phone": "Telefon cont Cargus",
+          "cargus_email": "Email Cargus",
+          "cargus_password": "Parola Cargus"
+        }
+      },
+      "sameday_login": {
+        "title": "Autentificare Sameday",
+        "description": "Introdu telefonul si parola contului Sameday. Integrarea obtine automat refresh tokenul prin fluxul oficial Sameday Identity. Parola nu este salvata dupa configurare.",
+        "data": {
+          "sameday_phone": "Telefon Sameday",
+          "sameday_password": "Parola Sameday"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Sameday nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [SAMEDAY AUTH DIAG].",
+      "missing_code": "URL-ul introdus nu contine codul de autentificare.",
+      "invalid_state": "Sesiunea de autentificare nu corespunde. Reincearca procesul.",
+      "unsupported_courier": "Curierul selectat nu este activ inca in aceasta versiune.",
+      "invalid_auth": "Autentificare Sameday esuata. Verifica telefonul, parola sau refresh tokenul.",
+      "required": "Camp obligatoriu.",
+      "invalid_auth_fan": "Autentificare FAN Courier esuata. Verifica username-ul si parola.",
+      "cannot_connect_fan": "FAN Courier nu poate fi contactat momentan. Se va putea reincerca automat sau manual.",
+      "invalid_auth_cargus": "Autentificare Cargus esuata. Verifica emailul, parola, telefonul sau refresh tokenul.",
+      "cannot_connect_cargus": "Cargus nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [CARGUS AUTH DIAG].",
+      "invalid_auth_gls": "Autentificare GLS esuata. Verifica emailul si parola sau refresh tokenul.",
+      "cannot_connect_gls": "GLS nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [GLS AUTH DIAG]."
+    },
+    "abort": {
+      "already_configured": "Aceasta intrare este deja configurata. Pentru reconectare, sterge intrarea existenta si adaug-o din nou."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_parcels": {
+        "name": "Colete active"
+      },
+      "problem_parcels": {
+        "name": "Colete cu probleme"
+      },
+      "delivered_parcels": {
+        "name": "Colete livrate"
+      }
+    },
+    "button": {
+      "add_service": {
+        "name": "Adauga serviciu"
+      }
+    }
+  }
+}
