@@ -63,6 +63,52 @@ Statusuri normalizate folosite:
 
 ---
 
+## Instalare prin HACS
+
+Curieri Romania poate fi instalata prin **HACS** ca repository custom.
+
+1. Deschide Home Assistant.
+2. Mergi la:
+
+```text
+HACS > Integrations
+```
+
+3. Apasa meniul cu trei puncte din dreapta sus.
+4. Alege:
+
+```text
+Custom repositories
+```
+
+5. La **Repository**, introdu:
+
+```text
+https://github.com/HAForgeLabs/curieri-romania
+```
+
+6. La **Category**, alege:
+
+```text
+Integration
+```
+
+7. Apasa **Add**.
+8. Cauta **Curieri Romania** in HACS si instaleaza integrarea.
+9. Reporneste Home Assistant.
+10. Mergi la:
+
+```text
+Settings > Devices & services > Add integration
+```
+
+11. Cauta **Curieri Romania**.
+12. Adauga mai intai intrarea de administrare, apoi adauga curierii doriti.
+
+Dupa actualizare prin HACS, este recomandat restart Home Assistant si refresh fortat in browser pentru incarcarea corecta a panelului.
+
+---
+
 ## Instalare manuala
 
 1. Descarca arhiva release-ului.
@@ -88,7 +134,7 @@ Settings > Devices & services > Add integration
 5. Cauta **Curieri Romania**.
 6. Adauga mai intai intrarea de administrare, apoi adauga curierii doriti.
 
-Dupa actualizare, este recomandat restart Home Assistant si refresh fortat in browser pentru incarcarea corecta a panelului.
+Dupa actualizare manuala, este recomandat restart Home Assistant si refresh fortat in browser pentru incarcarea corecta a panelului.
 
 ---
 
@@ -220,7 +266,7 @@ Portalurile si aplicatiile curierilor se pot modifica fara notificare. Daca un c
 
 Directii posibile pentru versiuni viitoare:
 
-- integrare prin HACS;
+- publicare ulterioara in lista implicita HACS, daca proiectul indeplineste conditiile necesare;
 - suport pentru curieri suplimentari;
 - filtrare mai avansata in panel;
 - separare clara colete primite / trimise, unde datele permit;
