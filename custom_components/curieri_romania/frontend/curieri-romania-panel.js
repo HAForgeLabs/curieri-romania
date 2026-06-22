@@ -798,13 +798,13 @@ class CurieriRomaniaPanel extends HTMLElement {
       <div class="cr-panel">
         <header class="cr-hero">
           <div class="cr-hero-main">
-            <div class="cr-logo"><img src="/curieri_romania_static/assets/curieri-romania-logo.png?v=1.0.0" alt="Curieri Romania"></div>
+            <div class="cr-logo"><img src="/curieri_romania_static/assets/curieri-romania-logo.png?v=1.0.1" alt="Curieri Romania"></div>
             <div>
               <h1>Curieri Romania</h1>
               <p>Monitorizare colete si statusuri curieri direct in Home Assistant.</p>
             </div>
             ${exitSettings.enabled ? `<button type="button" class="cr-exit-button" data-action="panel-exit" title="${this._escape(this._resolveExitUrl(exitSettings))}"><ha-icon icon="mdi:exit-to-app"></ha-icon><span>${this._escape(exitSettings.label || "Iesire")}</span></button>` : ""}
-            <a class="cr-hero-badge" href="https://haforgelabs.ro" target="_blank" rel="noopener noreferrer" title="Deschide HAForge Labs"><img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.0" alt="HAForge Labs"><span>HAForge Labs</span><small>v1.0.0</small></a>
+            <a class="cr-hero-badge" href="https://haforgelabs.ro" target="_blank" rel="noopener noreferrer" title="Deschide HAForge Labs"><img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.1" alt="HAForge Labs"><span>HAForge Labs</span><small>v1.0.1</small></a>
           </div>
           <aside class="cr-hero-side">
             ${this._sideMetric("Licenta", this._licenseShortStatus(license.status), this._licenseClass(license.status))}
@@ -1062,6 +1062,10 @@ class CurieriRomaniaPanel extends HTMLElement {
           ${this._licenseTile("Cont", license.account, "mdi:account-outline")}
           ${this._licenseTile("Mesaj", license.message, "mdi:message-text-outline")}
         </section>
+        <section class="cr-contact-note">
+          <h3>Confidentialitate licentiere</h3>
+          <p>La verificarea licentei se trimit doar cheia de licenta, produsul, versiunea si un hash anonim al instalarii. Nu se trimit date despre colete, AWB-uri, adrese, telefoane, parole, tokenuri sau istoric de livrare.</p>
+        </section>
         <section class="cr-form-card">
           <div class="cr-section-head"><div><span>Activare</span><h3>Introdu codul de licenta</h3></div></div>
           <form data-form="license">
@@ -1105,7 +1109,7 @@ class CurieriRomaniaPanel extends HTMLElement {
           <p>Informatii utile pentru suport, licente, raportare probleme si dezvoltarea integrarii Curieri Romania.</p>
         </div>
         <section class="cr-contact-hero">
-          <img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.0" alt="HAForge Labs">
+          <img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.1" alt="HAForge Labs">
           <div>
             <span>HAForge Labs</span>
             <h3>Curieri Romania pentru Home Assistant</h3>

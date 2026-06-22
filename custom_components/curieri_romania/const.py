@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "curieri_romania"
 NAME: Final = "Curieri Romania"
-VERSION: Final = "1.0.0"
+VERSION: Final = "1.0.1"
 
 PLATFORMS: Final = ["sensor", "button", "text"]
 
@@ -41,6 +41,8 @@ SERVICE_UPDATE_NOTIFICATION_SETTINGS: Final = "update_notification_settings"
 
 STORAGE_KEY_LICENSE: Final = f"{DOMAIN}_licenta"
 STORAGE_VERSION_LICENSE: Final = 1
+STORAGE_KEY_INSTALLATION: Final = f"{DOMAIN}_installation"
+STORAGE_VERSION_INSTALLATION: Final = 1
 STORAGE_KEY_NOTIFICATIONS: Final = f"{DOMAIN}_notificari"
 STORAGE_VERSION_NOTIFICATIONS: Final = 1
 STORAGE_KEY_NOTIFICATION_SETTINGS: Final = f"{DOMAIN}_setari_notificari"

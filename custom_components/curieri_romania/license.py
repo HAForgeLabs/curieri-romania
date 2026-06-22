@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,6 +14,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
+
+try:
+    from homeassistant.helpers.instance_id import async_get as async_get_instance_id
+except ImportError:  # compatibilitate cu versiuni HA mai vechi
+    async_get_instance_id = None
 
 from .const import (
     CONF_LICENSE_KEY,
@@ -28,9 +34,12 @@ from .const import (
     LICENSE_STATUS_REVOKED,
     LICENSE_STATUS_TRIAL,
     LICENSE_STATUS_UNKNOWN,
+    STORAGE_KEY_INSTALLATION,
     STORAGE_KEY_LICENSE,
+    STORAGE_VERSION_INSTALLATION,
     STORAGE_VERSION_LICENSE,
     URL_API_LICENTA,
+    VERSION,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,22 +79,76 @@ RezultatLicenta = LicenseResult
 
 
 def build_instance_fingerprint(hass: HomeAssistant) -> str:
-    """Construieste o amprenta locala stabila pentru instanta Home Assistant."""
+    """Returneaza hash-ul anonim cache-uit pentru compatibilitate legacy.
 
-    parts = [
-        DOMAIN,
-        getattr(hass.config, "config_dir", "") or "",
-        getattr(hass.config, "location_name", "") or "",
-        getattr(hass.config, "internal_url", "") or "",
-        getattr(hass.config, "external_url", "") or "",
-    ]
-    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    Functia veche era sincrona si construia fingerprint-ul din detalii ale
+    instantei Home Assistant. Din motive de privacy, nu mai folosim acele date.
+    Validarea licentei foloseste acum async_build_installation_hash().
+    """
+
+    cached_hash = hass.data.get(f"{DOMAIN}_installation_id_hash")
+    if isinstance(cached_hash, str) and cached_hash:
+        return cached_hash
+    return hashlib.sha256(f"{DOMAIN}|legacy-no-instance-data".encode("utf-8")).hexdigest()
 
 
 def construieste_fingerprint_instanta(hass: HomeAssistant) -> str:
     """Alias in romana pentru compatibilitate cu celelalte proiecte."""
 
     return build_instance_fingerprint(hass)
+
+
+async def _async_get_local_installation_id(hass: HomeAssistant) -> str:
+    """Returneaza un ID local random, folosit doar ca fallback anonim."""
+
+    store = Store[dict[str, Any]](hass, STORAGE_VERSION_INSTALLATION, STORAGE_KEY_INSTALLATION)
+    data = await store.async_load()
+    data = data if isinstance(data, dict) else {}
+
+    installation_id = str(data.get("installation_id", "") or "").strip()
+    if not installation_id:
+        installation_id = uuid.uuid4().hex
+        await store.async_save({
+            "installation_id": installation_id,
+            "created_at": _now_utc_iso(),
+        })
+
+    return installation_id
+
+
+async def async_build_installation_hash(hass: HomeAssistant) -> str:
+    """Construieste un identificator anonim si stabil pentru licentiere.
+
+    Nu foloseste numele locatiei, URL-uri, calea de configurare, IP-uri sau date
+    despre colete. Preferam ID-ul intern Home Assistant, iar daca nu este
+    disponibil folosim un UUID local generat random si stocat local.
+    """
+
+    cache_key = f"{DOMAIN}_installation_id_hash"
+    cached_hash = hass.data.get(cache_key)
+    if isinstance(cached_hash, str) and cached_hash:
+        return cached_hash
+
+    source_type = "local_uuid"
+    source_value = ""
+
+    if async_get_instance_id is not None:
+        try:
+            ha_instance_id = await async_get_instance_id(hass)
+            source_value = str(ha_instance_id or "").strip()
+            if source_value:
+                source_type = "ha_instance_id"
+        except Exception as err:  # noqa: BLE001 - fallback sigur, fara blocarea integrarii
+            _LOGGER.debug("Curieri Romania: nu s-a putut citi instance_id HA: %s", err)
+
+    if not source_value:
+        source_value = await _async_get_local_installation_id(hass)
+
+    installation_hash = hashlib.sha256(
+        f"{DOMAIN}|{source_type}|{source_value}".encode("utf-8")
+    ).hexdigest()
+    hass.data[cache_key] = installation_hash
+    return installation_hash
 
 
 async def async_get_global_license(hass: HomeAssistant) -> dict[str, Any]:
@@ -111,7 +174,9 @@ async def async_save_global_license(
     """Salveaza licenta globala si ultimul rezultat de verificare."""
 
     store = Store[dict[str, Any]](hass, STORAGE_VERSION_LICENSE, STORAGE_KEY_LICENSE)
-    final_username = str((result.username if result and result.username else username) or "").strip()
+    # Pastram local doar utilizatorul intors explicit de server. Nu mai salvam
+    # fallback-uri locale precum numele instantei Home Assistant.
+    final_username = str((result.username if result and result.username else "") or "").strip()
     payload: dict[str, Any] = {
         CONF_LICENSE_KEY: str(license_key).strip() or "TRIAL",
         CONF_LICENSE_USER: final_username,
@@ -135,9 +200,9 @@ async def async_salveaza_licenta_globala(
 
 
 def _default_license_username(hass: HomeAssistant) -> str:
-    """Returneaza un utilizator implicit sigur pentru validare."""
+    """Returneaza utilizatorul implicit pentru validare, fara date locale HA."""
 
-    return str(getattr(hass.config, "location_name", "") or DOMAIN).strip()
+    return ""
 
 
 async def async_get_license_context(
@@ -210,11 +275,17 @@ async def async_validate_license(
     """Valideaza licenta la serverul de licentiere."""
 
     session = async_get_clientsession(hass)
+    installation_hash = await async_build_installation_hash(hass)
     payload = {
         "license_key": str(license_key or "").strip() or "TRIAL",
-        "fingerprint": build_instance_fingerprint(hass),
         "product": DOMAIN,
-        "username": str(username or "").strip(),
+        "version": VERSION,
+        "installation_id_hash": installation_hash,
+        # Pastram temporar campul fingerprint pentru compatibilitate cu workerul
+        # existent, dar valoarea este acelasi hash anonim, fara date locale HA.
+        "fingerprint": installation_hash,
+        # Camp pastrat gol pentru compatibilitate cu API-ul vechi.
+        "username": "",
     }
 
     try:
