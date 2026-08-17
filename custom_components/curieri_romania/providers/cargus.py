@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 from datetime import datetime
+import hashlib
+import json
 import logging
 import time
 import random
@@ -18,14 +22,17 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from ..const import (
     CONF_CARGUS_ACCESS_TOKEN,
+    CONF_CARGUS_EMAIL,
+    CONF_CARGUS_PASSWORD,
     CONF_CARGUS_PHONE,
     CONF_CARGUS_REFRESH_TOKEN,
+    CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT,
     CONF_CARGUS_TOKEN_EXPIRES_AT,
     COURIER_CARGUS,
 )
 from ..models import Parcel, ParcelDirection, ParcelEvent
 from ..status import NormalizedStatus, normalize_cargus_status
-from .base import CourierProvider, CourierProviderError
+from .base import CourierProvider, CourierProviderAuthError, CourierProviderError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +56,9 @@ CARGUS_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari"
 )
 CARGUS_TOKEN_REFRESH_MARGIN = 300
+CARGUS_REFRESH_TOKEN_MARGIN = 900
+CARGUS_REFRESH_TOKEN_FALLBACK_LIFETIME = 480
+CARGUS_PARCEL_CACHE_SECONDS = 1800
 
 
 class CargusProvider(CourierProvider):
@@ -63,6 +73,9 @@ class CargusProvider(CourierProvider):
         super().__init__(hass)
         self.entry = entry
         self._session = async_get_clientsession(hass)
+        self._refresh_lock = asyncio.Lock()
+        self._cached_parcels: list[Parcel] | None = None
+        self._cached_parcels_at: float | None = None
         self.debug_info: dict[str, Any] = {}
 
     async def async_get_parcels(self) -> list[Parcel]:
@@ -72,6 +85,21 @@ class CargusProvider(CourierProvider):
         token = await self._async_get_access_token()
         if not phone or not token:
             raise CourierProviderError("Cargus nu este configurat complet.")
+
+        now = time.time()
+        if (
+            self._cached_parcels is not None
+            and self._cached_parcels_at is not None
+            and now - self._cached_parcels_at < CARGUS_PARCEL_CACHE_SECONDS
+        ):
+            self.debug_info.update(
+                {
+                    "parcel_source": "cache",
+                    "parcel_cache_age_seconds": round(now - self._cached_parcels_at),
+                    "unique_parcels": len(self._cached_parcels),
+                }
+            )
+            return list(self._cached_parcels)
 
         errors: list[str] = []
         items: list[dict[str, Any]] = []
@@ -107,8 +135,11 @@ class CargusProvider(CourierProvider):
             seen.add(parcel.unique_key)
             parcels.append(parcel)
 
+        self._cached_parcels = list(parcels)
+        self._cached_parcels_at = time.time()
         self.debug_info.update(
             {
+                "parcel_source": "api",
                 "shipment_types": list(CARGUS_SHIPMENT_TYPES),
                 "raw_items": len(items),
                 "unique_items": len(unique_items),
@@ -122,35 +153,206 @@ class CargusProvider(CourierProvider):
         )
         return parcels
 
-    async def _async_get_access_token(self) -> str:
-        """Returneaza un access token Cargus valid, folosind refresh token daca exista."""
+    async def _async_get_access_token(self, *, force_refresh: bool = False) -> str:
+        """Returneaza un access token valid si serializeaza refresh-urile Cargus."""
 
-        refresh_token = str(self.entry.data.get(CONF_CARGUS_REFRESH_TOKEN, "")).strip()
-        cached_token = _normalize_access_token(str(self.entry.data.get(CONF_CARGUS_ACCESS_TOKEN, "")).strip())
-        expires_at = _safe_float(self.entry.data.get(CONF_CARGUS_TOKEN_EXPIRES_AT))
+        async with self._refresh_lock:
+            refresh_token = str(self.entry.data.get(CONF_CARGUS_REFRESH_TOKEN, "")).strip()
+            cached_token = _normalize_access_token(
+                str(self.entry.data.get(CONF_CARGUS_ACCESS_TOKEN, "")).strip()
+            )
+            expires_at = _safe_float(self.entry.data.get(CONF_CARGUS_TOKEN_EXPIRES_AT))
+            refresh_expires_at = _safe_float(
+                self.entry.data.get(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT)
+            )
+            now = time.time()
+            seconds_left = expires_at - now if expires_at else None
+            refresh_seconds_left = (
+                refresh_expires_at - now if refresh_expires_at else None
+            )
 
-        if cached_token and (not expires_at or expires_at > time.time() + CARGUS_TOKEN_REFRESH_MARGIN):
-            return cached_token
+            self.debug_info.update(
+                {
+                    "token_present": bool(cached_token),
+                    "refresh_token_present": bool(refresh_token),
+                    "token_expires_at_present": expires_at is not None,
+                    "token_seconds_left": round(seconds_left) if seconds_left is not None else None,
+                    "refresh_token_expires_at_present": refresh_expires_at is not None,
+                    "refresh_token_seconds_left": (
+                        round(refresh_seconds_left)
+                        if refresh_seconds_left is not None
+                        else None
+                    ),
+                    "token_refresh_forced": force_refresh,
+                    "access_token_fingerprint_before": _token_fingerprint(cached_token),
+                    "refresh_token_fingerprint_before": _token_fingerprint(refresh_token),
+                }
+            )
 
-        if not refresh_token:
-            # Compatibilitate cu intrarile vechi v0.4.9, bazate pe access token manual.
-            return cached_token
+            access_token_safe = (
+                not expires_at or expires_at > now + CARGUS_TOKEN_REFRESH_MARGIN
+            )
+            refresh_grant_safe = (
+                not refresh_expires_at
+                or refresh_expires_at > now + CARGUS_REFRESH_TOKEN_MARGIN
+            )
+            if refresh_expires_at and refresh_expires_at <= now + CARGUS_REFRESH_TOKEN_MARGIN:
+                full_login_token = await self._async_full_login(reason="grant_absolute_expiry")
+                if full_login_token:
+                    return full_login_token
 
-        payload = await _async_refresh_cargus_token(self._session, refresh_token)
-        access_token = _normalize_access_token(str(payload.get("access_token", "")).strip())
-        if not access_token:
-            raise CourierProviderError("Autentificare Cargus expirata. Reconecteaza contul.")
+            if (
+                not force_refresh
+                and cached_token
+                and access_token_safe
+                and refresh_grant_safe
+            ):
+                self.debug_info["token_source"] = "cache"
+                return cached_token
 
-        new_refresh_token = str(payload.get("refresh_token") or refresh_token).strip()
-        expires_in = _safe_int(payload.get("expires_in"), 3600) or 3600
+            if not refresh_token:
+                # Compatibilitate cu intrarile vechi bazate pe access token manual.
+                self.debug_info["token_source"] = "manual_access_token"
+                return cached_token
+
+            if force_refresh:
+                reason = "forced_after_unauthorized"
+            elif refresh_expires_at and not refresh_grant_safe:
+                reason = "refresh_grant_margin"
+            else:
+                reason = "access_token_margin"
+            self.debug_info["refresh_reason"] = reason
+            _LOGGER.warning(
+                "[CARGUS REFRESH DIAG] start reason=%s access_seconds_left=%s "
+                "grant_seconds_left=%s forced=%s",
+                reason,
+                round(seconds_left) if seconds_left is not None else None,
+                round(refresh_seconds_left) if refresh_seconds_left is not None else None,
+                force_refresh,
+            )
+            try:
+                payload = await _async_refresh_cargus_token(self._session, refresh_token)
+            except CargusTokenRefreshError as err:
+                self.debug_info.update(err.safe_debug)
+                self.debug_info["refresh_success"] = False
+                _LOGGER.warning(
+                    "Cargus refresh esuat: status=%s error=%s description=%s",
+                    err.safe_debug.get("refresh_http_status"),
+                    err.safe_debug.get("refresh_error"),
+                    err.safe_debug.get("refresh_error_description"),
+                )
+                full_login_token = await self._async_full_login(reason="refresh_failed")
+                if full_login_token:
+                    return full_login_token
+                raise CourierProviderAuthError(
+                    "Autentificare Cargus expirata. Reconecteaza contul."
+                ) from err
+
+            access_token = _normalize_access_token(str(payload.get("access_token", "")).strip())
+            if not access_token:
+                self.debug_info["refresh_success"] = False
+                self.debug_info["refresh_error"] = "missing_access_token"
+                raise CourierProviderAuthError(
+                    "Autentificare Cargus expirata. Reconecteaza contul."
+                )
+
+            new_refresh_token = str(payload.get("refresh_token") or refresh_token).strip()
+            expires_in = _safe_int(payload.get("expires_in"), 3600) or 3600
+            declared_refresh_expires_in = _safe_int(payload.get("refresh_token_expires_in"))
+            refresh_expires_in, refresh_expiry_source = _effective_refresh_lifetime(
+                new_refresh_token, declared_refresh_expires_in
+            )
+            refreshed_at = time.time()
+            access_expires_at = refreshed_at + expires_in
+            refresh_token_expires_at = (
+                refreshed_at + refresh_expires_in if refresh_expires_in else None
+            )
+            new_data = dict(self.entry.data)
+            new_data[CONF_CARGUS_ACCESS_TOKEN] = access_token
+            new_data[CONF_CARGUS_REFRESH_TOKEN] = new_refresh_token
+            new_data[CONF_CARGUS_TOKEN_EXPIRES_AT] = access_expires_at
+            if refresh_token_expires_at:
+                new_data[CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT] = refresh_token_expires_at
+            else:
+                new_data.pop(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT, None)
+            self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+
+            access_refresh_due_in = max(0, expires_in - CARGUS_TOKEN_REFRESH_MARGIN)
+            grant_refresh_due_in = (
+                max(0, refresh_expires_in - CARGUS_REFRESH_TOKEN_MARGIN)
+                if refresh_expires_in
+                else None
+            )
+            next_refresh_in = min(
+                value
+                for value in (access_refresh_due_in, grant_refresh_due_in)
+                if value is not None
+            )
+            rotated = new_refresh_token != refresh_token
+            self.debug_info.update(
+                {
+                    "token_source": "refresh",
+                    "token_refreshed": True,
+                    "refresh_success": True,
+                    "refresh_http_status": 200,
+                    "token_expires_in": expires_in,
+                    "refresh_token_expires_in_declared": declared_refresh_expires_in,
+                    "refresh_token_expires_in_effective": refresh_expires_in,
+                    "refresh_token_expiry_source": refresh_expiry_source,
+                    "refresh_not_before": payload.get("not_before"),
+                    "refresh_token_rotated": rotated,
+                    "next_refresh_in": next_refresh_in,
+                    "access_token_fingerprint_after": _token_fingerprint(access_token),
+                    "refresh_token_fingerprint_after": _token_fingerprint(new_refresh_token),
+                }
+            )
+            _LOGGER.warning(
+                "[CARGUS REFRESH DIAG] success reason=%s status=200 "
+                "access_expires_in=%s grant_declared=%s grant_effective=%s "
+                "grant_source=%s refresh_token_rotated=%s next_refresh_in=%s",
+                reason,
+                expires_in,
+                declared_refresh_expires_in,
+                refresh_expires_in,
+                refresh_expiry_source,
+                rotated,
+                next_refresh_in,
+            )
+            return access_token
+
+
+    async def _async_full_login(self, *, reason: str) -> str | None:
+        """Obtine o familie noua de tokenuri folosind credentialele salvate."""
+        email_value = str(self.entry.data.get(CONF_CARGUS_EMAIL, "")).strip()
+        password = str(self.entry.data.get(CONF_CARGUS_PASSWORD, ""))
+        if not email_value or not password:
+            return None
+        try:
+            from ..config_flow import _sync_login_cargus_with_password
+            token_data = await self.hass.async_add_executor_job(
+                _sync_login_cargus_with_password, email_value, password
+            )
+        except Exception as err:  # autentificarea completa poate esua din motive externe
+            _LOGGER.warning(
+                "[CARGUS FULL LOGIN DIAG] failed reason=%s error_type=%s",
+                reason, type(err).__name__,
+            )
+            return None
+        access_token = _normalize_access_token(str(token_data.get(CONF_CARGUS_ACCESS_TOKEN, "")))
+        refresh_token = str(token_data.get(CONF_CARGUS_REFRESH_TOKEN, "")).strip()
+        if not access_token or not refresh_token:
+            return None
         new_data = dict(self.entry.data)
-        new_data[CONF_CARGUS_ACCESS_TOKEN] = access_token
-        new_data[CONF_CARGUS_REFRESH_TOKEN] = new_refresh_token
-        new_data[CONF_CARGUS_TOKEN_EXPIRES_AT] = time.time() + expires_in
+        new_data.update(token_data)
         self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-
-        self.debug_info["token_refreshed"] = True
-        self.debug_info["token_expires_in"] = expires_in
+        _LOGGER.warning(
+            "[CARGUS FULL LOGIN DIAG] success reason=%s token_rotated=True", reason
+        )
+        self.debug_info.update({
+            "token_source": "full_login",
+            "full_login_success": True,
+            "full_login_reason": reason,
+        })
         return access_token
 
 
@@ -239,7 +441,54 @@ class CargusProvider(CourierProvider):
         token: str,
         params: dict[str, Any],
     ) -> Any:
-        """Apeleaza API-ul Cargus cu Authorization si K generat pentru request."""
+        """Apeleaza API-ul Cargus si reincearca o data dupa 401/403."""
+
+        request_token = _normalize_access_token(token)
+        for attempt in range(2):
+            status, payload = await self._async_request_json(
+                path, phone=phone, token=request_token, params=params
+            )
+            self.debug_info["last_api_path"] = path
+            self.debug_info["last_api_status"] = status
+            self.debug_info["last_api_attempt"] = attempt + 1
+
+            if status not in (401, 403):
+                if status >= 400:
+                    raise CourierProviderError(f"HTTP {status}")
+                if attempt > 0:
+                    self.debug_info["unauthorized_retry_success"] = True
+                return payload
+
+            self.debug_info["unauthorized_status"] = status
+            self.debug_info["unauthorized_retry_attempted"] = attempt == 0
+            if attempt > 0:
+                self.debug_info["unauthorized_retry_success"] = False
+                raise CourierProviderAuthError(
+                    "Autentificare Cargus expirata. Reconecteaza contul."
+                )
+
+            latest_token = _normalize_access_token(
+                str(self.entry.data.get(CONF_CARGUS_ACCESS_TOKEN, "")).strip()
+            )
+            if latest_token and latest_token != request_token:
+                # Alt request a facut deja refresh. Refolosim tokenul nou fara alt refresh.
+                request_token = latest_token
+                self.debug_info["unauthorized_recovery"] = "reused_rotated_token"
+            else:
+                request_token = await self._async_get_access_token(force_refresh=True)
+                self.debug_info["unauthorized_recovery"] = "forced_refresh"
+
+        raise CourierProviderError("Cargus nu poate fi interogat momentan.")
+
+    async def _async_request_json(
+        self,
+        path: str,
+        *,
+        phone: str,
+        token: str,
+        params: dict[str, Any],
+    ) -> tuple[int, Any]:
+        """Executa o singura cerere Cargus si returneaza statusul si payloadul."""
 
         headers = _build_headers(phone=phone, token=token)
         try:
@@ -248,13 +497,16 @@ class CargusProvider(CourierProvider):
                 headers=headers,
                 params=params,
             ) as response:
-                if response.status in (401, 403):
-                    raise CourierProviderError("Autentificare Cargus expirata. Reconecteaza contul.")
-                if response.status >= 400:
-                    raise CourierProviderError(f"HTTP {response.status}")
-                return await response.json(content_type=None)
+                payload: Any = None
+                if response.status < 400:
+                    payload = await response.json(content_type=None)
+                else:
+                    # Corpul de eroare nu este pastrat pentru a evita date sensibile.
+                    await response.read()
+                return response.status, payload
         except ClientError as err:
             raise CourierProviderError("Cargus nu poate fi interogat momentan.") from err
+
 
     def _parse_parcel(self, item: dict[str, Any]) -> Parcel | None:
         """Mapeaza un item Cargus in modelul comun Parcel."""
@@ -354,8 +606,49 @@ class CargusProvider(CourierProvider):
         )
 
 
+def _effective_refresh_lifetime(
+    refresh_token: str, declared_seconds: int | None
+) -> tuple[int, str]:
+    """Calculeaza conservator durata reala a grantului Cargus."""
+
+    jwt_seconds = _jwt_seconds_until_expiry(refresh_token)
+    candidates = [CARGUS_REFRESH_TOKEN_FALLBACK_LIFETIME]
+    source = "fallback_cap"
+    if declared_seconds and declared_seconds > 0:
+        candidates.append(declared_seconds)
+    if jwt_seconds and jwt_seconds > 0:
+        candidates.append(jwt_seconds)
+        source = "jwt_exp"
+    effective = max(60, min(candidates))
+    return effective, source
+
+
+def _jwt_seconds_until_expiry(token: str) -> int | None:
+    """Citeste local exp dintr-un JWT, fara validare si fara logarea tokenului."""
+
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        segment = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(segment.encode("ascii")))
+        exp = int(payload.get("exp"))
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    seconds = exp - int(time.time())
+    return seconds if seconds > 0 else None
+
+
+class CargusTokenRefreshError(Exception):
+    """Eroare refresh Cargus cu diagnostic sigur, fara tokenuri."""
+
+    def __init__(self, message: str, safe_debug: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.safe_debug = safe_debug
+
+
 async def _async_refresh_cargus_token(session: Any, refresh_token: str) -> dict[str, Any]:
-    """Schimba refresh tokenul Cargus in access token nou."""
+    """Schimba refresh tokenul Cargus si pastreaza doar diagnostic sigur."""
 
     data = {
         "client_id": CARGUS_CLIENT_ID,
@@ -373,16 +666,44 @@ async def _async_refresh_cargus_token(session: Any, refresh_token: str) -> dict[
 
     try:
         async with session.post(CARGUS_TOKEN_URL, data=data, headers=headers) as response:
-            payload = await response.json(content_type=None)
-            if response.status in (400, 401, 403):
-                raise CourierProviderError("Autentificare Cargus expirata. Reconecteaza contul.")
+            try:
+                payload = await response.json(content_type=None)
+            except (TypeError, ValueError):
+                payload = {}
+
             if response.status >= 400:
-                raise CourierProviderError(f"Cargus token HTTP {response.status}")
+                safe_debug = {
+                    "refresh_http_status": response.status,
+                    "refresh_error": _safe_debug_text(
+                        payload.get("error") if isinstance(payload, dict) else None
+                    ),
+                    "refresh_error_description": _safe_debug_text(
+                        payload.get("error_description") if isinstance(payload, dict) else None,
+                        max_length=240,
+                    ),
+                    "refresh_response_keys": sorted(payload.keys())
+                    if isinstance(payload, dict)
+                    else [],
+                }
+                raise CargusTokenRefreshError(
+                    f"Cargus token HTTP {response.status}", safe_debug
+                )
     except ClientError as err:
-        raise CourierProviderError("Cargus nu poate improspata autentificarea momentan.") from err
+        raise CourierProviderError(
+            "Cargus nu poate improspata autentificarea momentan."
+        ) from err
 
     if not isinstance(payload, dict) or not payload.get("access_token"):
-        raise CourierProviderError("Cargus nu a returnat access token.")
+        raise CargusTokenRefreshError(
+            "Cargus nu a returnat access token.",
+            {
+                "refresh_http_status": 200,
+                "refresh_error": "missing_access_token",
+                "refresh_response_keys": sorted(payload.keys())
+                if isinstance(payload, dict)
+                else [],
+            },
+        )
     return payload
 
 
@@ -441,6 +762,24 @@ def _generate_phone_key(phone_number: str) -> str:
     mixed = mixed[:6] + str(k2) + mixed[6:8] + str(k3) + mixed[8:]
     mixed = mixed[:k1] + str(k0) + mixed[k1:] + str(k1)
     return mixed
+
+
+def _token_fingerprint(value: str) -> str | None:
+    """Returneaza o amprenta scurta, nereversibila, pentru compararea tokenurilor."""
+
+    token = value.strip()
+    if not token:
+        return None
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+
+
+def _safe_debug_text(value: Any, *, max_length: int = 120) -> str | None:
+    """Curata un text de diagnostic si ii limiteaza lungimea."""
+
+    text = _as_text(value)
+    if not text:
+        return None
+    return " ".join(text.split())[:max_length]
 
 
 def _normalize_access_token(value: str) -> str:

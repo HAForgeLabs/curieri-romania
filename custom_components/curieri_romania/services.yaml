@@ -1,0 +1,94 @@
+refresh_license_status:
+  name: Actualizeaza statusul licentei
+  description: Revalideaza statusul licentei Curieri Romania si actualizeaza datele salvate local.
+
+send_test_notification:
+  name: Trimite notificare de test
+  description: Trimite o notificare simpla de test prin serviciul de notificare configurat.
+
+simulate_new_parcel_notification:
+  name: Simuleaza colet nou
+  description: Trimite o notificare de test pentru aparitia unui colet nou.
+
+simulate_status_change_notification:
+  name: Simuleaza schimbare status
+  description: Trimite o notificare de test pentru schimbarea statusului unui colet.
+
+reset_test_notification_history:
+  name: Reseteaza istoricul notificarilor de test
+  description: Sterge doar istoricul folosit pentru notificarile simulate de test.
+
+update_notification_settings:
+  name: Actualizeaza setarile de notificari si afisare
+  description: Actualizeaza setarile Curieri Romania pentru notificari, afisare colete si limite de entitati.
+  fields:
+    notifications_enabled:
+      name: Notificari active
+      description: Activeaza sau dezactiveaza notificarile Curieri Romania.
+      selector:
+        boolean:
+    notify_service:
+      name: Serviciu notificare
+      description: Serviciul Home Assistant folosit pentru trimiterea notificarilor.
+      selector:
+        text:
+    notify_new_parcel:
+      name: Notificare colet nou
+      description: Trimite notificare cand apare un colet nou.
+      selector:
+        boolean:
+    notify_status_change:
+      name: Notificare schimbare status
+      description: Trimite notificare cand un colet isi schimba statusul.
+      selector:
+        boolean:
+    notify_out_for_delivery:
+      name: Notificare in livrare
+      description: Trimite notificare cand un colet intra in livrare.
+      selector:
+        boolean:
+    notify_pickup:
+      name: Notificare ridicare
+      description: Trimite notificare cand un colet este disponibil la locker sau punct de ridicare.
+      selector:
+        boolean:
+    notify_delivered:
+      name: Notificare livrat
+      description: Trimite notificare cand un colet este livrat.
+      selector:
+        boolean:
+    notify_problems:
+      name: Notificare probleme
+      description: Trimite notificare cand un colet are probleme, livrare esuata sau situatie similara.
+      selector:
+        boolean:
+    notify_returned:
+      name: Notificare retur
+      description: Trimite notificare cand un colet este returnat sau blocat pe retur.
+      selector:
+        boolean:
+    parcel_visibility:
+      name: Afisare colete
+      description: Stabileste ce colete sunt expuse in entitati si in dashboard.
+      selector:
+        select:
+          options:
+            - active_problem
+            - recent_delivered
+            - all
+    delivered_retention_days:
+      name: Zile pastrare colete livrate
+      description: Numarul de zile pentru care se pastreaza coletele livrate cand este aleasa afisarea cu livrate recente.
+      selector:
+        number:
+          min: 1
+          max: 365
+          mode: box
+    max_parcels_per_courier:
+      name: Limita colete per curier
+      description: Numarul maxim de colete expuse per curier. Valoarea 0 inseamna fara limita.
+      selector:
+        number:
+          min: 0
+          max: 500
+          mode: box

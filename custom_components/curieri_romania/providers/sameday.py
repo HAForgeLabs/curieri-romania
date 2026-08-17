@@ -21,7 +21,7 @@ from ..const import (
 )
 from ..models import Parcel, ParcelDirection, ParcelEvent
 from ..status import NormalizedStatus, normalize_sameday_status
-from .base import CourierProvider, CourierProviderError
+from .base import CourierProvider, CourierProviderAuthError, CourierProviderError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,7 +74,9 @@ class SamedayProvider(CourierProvider):
 
         if not self._entry.data.get(CONF_SAMEDAY_ACCESS_TOKEN):
             self._debug_info["skip_reason"] = "missing_access_token"
-            return []
+            raise CourierProviderAuthError(
+                "Autentificare Sameday expirata. Reconecteaza contul."
+            )
 
         dashboard = await self._async_get_json("/api/awbs?api-version=2.0")
         parcels: list[Parcel] = []
@@ -132,6 +134,8 @@ class SamedayProvider(CourierProvider):
         for parcel in parcels:
             try:
                 details = await self.async_get_details(parcel.awb)
+            except CourierProviderAuthError:
+                raise
             except CourierProviderError:
                 dashboard_detail_errors += 1
                 enriched_parcels.append(parcel)
@@ -169,6 +173,8 @@ class SamedayProvider(CourierProvider):
                 if parcel.awb not in seen_awbs:
                     seen_awbs.add(parcel.awb)
                     parcels.append(parcel)
+        except CourierProviderAuthError:
+            raise
         except CourierProviderError as err:
             history_fetch_error = str(err)
 
@@ -190,6 +196,8 @@ class SamedayProvider(CourierProvider):
                 if parcel.awb not in seen_awbs:
                     seen_awbs.add(parcel.awb)
                     parcels.append(parcel)
+        except CourierProviderAuthError:
+            raise
         except CourierProviderError as err:
             sent_fetch_error = str(err)
 
@@ -208,6 +216,8 @@ class SamedayProvider(CourierProvider):
                 continue
             try:
                 details = await self.async_get_details(parcel.awb)
+            except CourierProviderAuthError:
+                raise
             except CourierProviderError:
                 details_errors += 1
                 detailed_parcels.append(parcel)
@@ -276,7 +286,7 @@ class SamedayProvider(CourierProvider):
         access_token = self._entry.data.get(CONF_SAMEDAY_ACCESS_TOKEN)
         if not access_token:
             self._debug_info["last_error"] = "missing_access_token"
-            raise CourierProviderError("Sameday nu este autentificat.")
+            raise CourierProviderAuthError("Autentificare Sameday expirata. Reconecteaza contul.")
 
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -289,7 +299,7 @@ class SamedayProvider(CourierProvider):
                 request_debug["status"] = response.status
                 if response.status == 401:
                     self._debug_info["last_error"] = "http_401"
-                    raise CourierProviderError("Autentificare Sameday expirata. Reconecteaza contul.")
+                    raise CourierProviderAuthError("Autentificare Sameday expirata. Reconecteaza contul.")
                 if response.status >= 400:
                     text = await response.text()
                     request_debug["body_preview"] = _mask_text(text[:120])
@@ -328,7 +338,7 @@ class SamedayProvider(CourierProvider):
         refresh_token = self._entry.data.get(CONF_SAMEDAY_REFRESH_TOKEN)
         if not refresh_token:
             self._debug_info["last_error"] = "missing_refresh_token"
-            raise CourierProviderError("Autentificare Sameday expirata. Reconecteaza contul.")
+            raise CourierProviderAuthError("Autentificare Sameday expirata. Reconecteaza contul.")
 
         payload = {
             "grant_type": "refresh_token",
@@ -345,12 +355,19 @@ class SamedayProvider(CourierProvider):
             self._debug_info["refresh_status"] = response.status
             if response.status >= 400:
                 self._debug_info["last_error"] = f"refresh_http_{response.status}"
-                raise CourierProviderError("Autentificare Sameday expirata. Reconecteaza contul.")
+                raise CourierProviderAuthError("Autentificare Sameday expirata. Reconecteaza contul.")
             token_response = await response.json(content_type=None)
+
+        access_token = str(token_response.get("access_token") or "").strip()
+        if not access_token:
+            self._debug_info["last_error"] = "refresh_missing_access_token"
+            raise CourierProviderAuthError(
+                "Autentificare Sameday expirata. Reconecteaza contul."
+            )
 
         expires_in = int(token_response.get("expires_in", 3600))
         new_data = dict(self._entry.data)
-        new_data[CONF_SAMEDAY_ACCESS_TOKEN] = token_response.get("access_token")
+        new_data[CONF_SAMEDAY_ACCESS_TOKEN] = access_token
         new_data[CONF_SAMEDAY_REFRESH_TOKEN] = token_response.get("refresh_token", refresh_token)
         new_data[CONF_SAMEDAY_TOKEN_TYPE] = token_response.get("token_type", "Bearer")
         new_data[CONF_SAMEDAY_TOKEN_EXPIRES_AT] = time.time() + expires_in

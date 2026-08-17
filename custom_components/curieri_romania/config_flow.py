@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import html
 import logging
 import re
@@ -26,8 +27,11 @@ from .const import (
     ADMIN_UNIQUE_ID,
     CONF_COURIER,
     CONF_CARGUS_ACCESS_TOKEN,
+    CONF_CARGUS_EMAIL,
+    CONF_CARGUS_PASSWORD,
     CONF_CARGUS_PHONE,
     CONF_CARGUS_REFRESH_TOKEN,
+    CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT,
     CONF_CARGUS_TOKEN_EXPIRES_AT,
     CONF_ENABLED_COURIERS,
     CONF_ENTRY_TYPE,
@@ -95,8 +99,8 @@ METHOD_GLS_EMAIL_PASSWORD = "email_password"
 METHOD_GLS_BROWSER = "browser"
 METHOD_GLS_REFRESH_TOKEN = "refresh_token"
 FIELD_CARGUS_AUTH_METHOD = "cargus_auth_method"
-FIELD_CARGUS_EMAIL = "cargus_email"
-FIELD_CARGUS_PASSWORD = "cargus_password"
+FIELD_CARGUS_EMAIL = CONF_CARGUS_EMAIL
+FIELD_CARGUS_PASSWORD = CONF_CARGUS_PASSWORD
 METHOD_CARGUS_EMAIL_PASSWORD = "email_password"
 METHOD_CARGUS_HELPER = "helper"
 METHOD_CARGUS_REFRESH_TOKEN = "refresh_token"
@@ -140,6 +144,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initializeaza flow-ul."""
 
         self._courier: str | None = None
+        self._reauth_entry: config_entries.ConfigEntry | None = None
         self._entry_title = NAME
         self._sameday_code_verifier: str | None = None
         self._sameday_state: str | None = None
@@ -151,6 +156,31 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._gls_state: str | None = None
         self._gls_nonce: str | None = None
         self._gls_authorization_url: str | None = None
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+        """Porneste reautentificarea pentru o intrare de curier existenta."""
+
+        entry_id = self.context.get("entry_id")
+        if not entry_id:
+            return self.async_abort(reason="reauth_entry_missing")
+
+        entry = self.hass.config_entries.async_get_entry(entry_id)
+        if entry is None:
+            return self.async_abort(reason="reauth_entry_missing")
+
+        courier = str(entry.data.get(CONF_COURIER, ""))
+        if courier not in {COURIER_CARGUS, COURIER_SAMEDAY}:
+            return self.async_abort(reason="reauth_not_supported")
+
+        self._reauth_entry = entry
+        self._courier = courier
+        self._entry_title = entry.title
+
+        if courier == COURIER_SAMEDAY:
+            return await self.async_step_sameday_auth_method()
+
+        self._cargus_phone = str(entry.data.get(CONF_CARGUS_PHONE, "")).strip()
+        return await self.async_step_cargus_auth_method()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Creeaza intai zona de administrare, apoi permite adaugarea serviciilor."""
@@ -344,9 +374,11 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_INSTANCE_NAME: self._entry_title,
                         CONF_ENABLED_COURIERS: [COURIER_CARGUS],
                         CONF_CARGUS_PHONE: phone,
+                        CONF_CARGUS_EMAIL: email_value,
+                        CONF_CARGUS_PASSWORD: password,
                         **validated_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return self._async_create_or_update_cargus_entry(data)
 
         schema = vol.Schema(
             {
@@ -643,7 +675,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return self._async_create_or_update_sameday_entry(data)
 
         schema = vol.Schema(
             {
@@ -704,7 +736,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return self._async_create_or_update_sameday_entry(data)
 
         default_token = self._default_sameday_refresh_token or ""
         schema = vol.Schema(
@@ -749,7 +781,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return self._async_create_or_update_sameday_entry(data)
 
         schema = vol.Schema(
             {
@@ -815,6 +847,17 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
             **token_data,
         }
+        return self._async_create_or_update_sameday_entry(data)
+
+    def _async_create_or_update_sameday_entry(self, data: dict[str, Any]) -> FlowResult:
+        """Creeaza intrarea Sameday sau finalizeaza reautentificarea existenta."""
+
+        if self._reauth_entry is not None:
+            return self.async_update_reload_and_abort(
+                self._reauth_entry,
+                data_updates=data,
+                reason="reauth_successful",
+            )
         return self.async_create_entry(title=self._entry_title, data=data)
 
     async def _async_try_create_cargus_entry(self, phone: str, refresh_token: str) -> FlowResult | None:
@@ -833,7 +876,23 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_CARGUS_REFRESH_TOKEN: token_data[CONF_CARGUS_REFRESH_TOKEN],
             CONF_CARGUS_ACCESS_TOKEN: token_data[CONF_CARGUS_ACCESS_TOKEN],
             CONF_CARGUS_TOKEN_EXPIRES_AT: token_data[CONF_CARGUS_TOKEN_EXPIRES_AT],
+            CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT: token_data.get(
+                CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT
+            ),
         }
+        if data.get(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT) is None:
+            data.pop(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT, None)
+        return self._async_create_or_update_cargus_entry(data)
+
+    def _async_create_or_update_cargus_entry(self, data: dict[str, Any]) -> FlowResult:
+        """Creeaza intrarea Cargus sau finalizeaza reautentificarea existenta."""
+
+        if self._reauth_entry is not None:
+            return self.async_update_reload_and_abort(
+                self._reauth_entry,
+                data_updates=data,
+                reason="reauth_successful",
+            )
         return self.async_create_entry(title=self._entry_title, data=data)
 
     async def _async_create_cargus_from_refresh_token(self, refresh_token: str) -> FlowResult:
@@ -1050,11 +1109,19 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await response.text()
 
         expires_in = int(token_payload.get("expires_in", 3600))
-        return {
+        refresh_expires_in = _safe_positive_int(
+            token_payload.get("refresh_token_expires_in")
+        )
+        token_data = {
             CONF_CARGUS_ACCESS_TOKEN: f"Bearer {access_token}",
             CONF_CARGUS_REFRESH_TOKEN: new_refresh_token,
             CONF_CARGUS_TOKEN_EXPIRES_AT: time.time() + expires_in,
         }
+        if refresh_expires_in:
+            token_data[CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT] = (
+                time.time() + refresh_expires_in
+            )
+        return token_data
 
     async def _async_validate_gls_refresh_token(self, refresh_token: str) -> dict[str, Any]:
         """Valideaza refresh tokenul GLS si returneaza tokenuri initiale."""
@@ -1857,12 +1924,48 @@ def _sync_login_cargus_with_password(email_value: str, password: str) -> dict[st
         raise ValueError("invalid_auth_cargus")
 
     expires_in = int(token_json.get("expires_in", 3600))
-    _LOGGER.warning("[CARGUS AUTH DIAG] step=success email=%s expires_in=%s", safe_email, expires_in)
-    return {
+    declared_refresh_expires_in = _safe_positive_int(token_json.get("refresh_token_expires_in"))
+    refresh_expires_in, refresh_expiry_source = _cargus_effective_refresh_lifetime(
+        refresh_token, declared_refresh_expires_in
+    )
+    _LOGGER.warning(
+        "[CARGUS AUTH DIAG] step=success email=%s expires_in=%s refresh_expires_in=%s",
+        safe_email,
+        expires_in,
+        declared_refresh_expires_in,
+    )
+    token_data = {
         CONF_CARGUS_ACCESS_TOKEN: f"Bearer {access_token}",
         CONF_CARGUS_REFRESH_TOKEN: refresh_token,
         CONF_CARGUS_TOKEN_EXPIRES_AT: time.time() + expires_in,
     }
+    if refresh_expires_in:
+        token_data[CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT] = (
+            time.time() + refresh_expires_in
+        )
+    return token_data
+
+
+def _cargus_effective_refresh_lifetime(
+    refresh_token: str, declared_seconds: int | None
+) -> tuple[int, str]:
+    """Calculeaza conservator durata efectiva a grantului Cargus."""
+
+    fallback = 480
+    candidates = [declared_seconds] if declared_seconds and declared_seconds > 0 else [fallback]
+    source = "declared" if declared_seconds and declared_seconds > 0 else "fallback"
+    parts = refresh_token.split(".")
+    if len(parts) >= 2:
+        try:
+            segment = parts[1] + "=" * (-len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(segment.encode("ascii")))
+            jwt_seconds = int(payload.get("exp")) - int(time.time())
+            if jwt_seconds > 0:
+                candidates.append(jwt_seconds)
+                source = "jwt_exp"
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    return max(60, min(candidates)), source
 
 
 def _build_cargus_authorization_url(
@@ -1896,7 +1999,7 @@ def _build_cargus_authorization_url(
 def _extract_cargus_b2c_values(page_text: str, current_url: str, session: Any) -> dict[str, str]:
     """Extrage tx si csrf din pagina Azure B2C Cargus."""
 
-    decoded = html.unescape(page_text).replace("\u0026", "&").replace("\/", "/")
+    decoded = html.unescape(page_text).replace("\u0026", "&").replace("\\/", "/")
     values: dict[str, str] = {}
 
     tx = _find_first(
@@ -2368,3 +2471,13 @@ def _extract_gls_state_from_location(location: str) -> str | None:
     query = parse_qs(parsed.query)
     values = query.get("state")
     return values[0] if values else None
+
+
+def _safe_positive_int(value: Any) -> int | None:
+    """Converteste o valoare intr-un int pozitiv."""
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None

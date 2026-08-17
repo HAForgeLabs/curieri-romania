@@ -7,11 +7,12 @@ from typing import Final
 
 DOMAIN: Final = "curieri_romania"
 NAME: Final = "Curieri Romania"
-VERSION: Final = "1.0.1"
+VERSION: Final = "1.0.9"
 
 PLATFORMS: Final = ["sensor", "button", "text"]
 
 DEFAULT_SCAN_INTERVAL: Final = timedelta(minutes=30)
+CARGUS_MAINTENANCE_INTERVAL: Final = timedelta(minutes=4)
 MIN_SCAN_INTERVAL: Final = timedelta(minutes=10)
 
 SIGNAL_LICENSE_UPDATED: Final = f"{DOMAIN}_license_updated"
@@ -72,9 +73,12 @@ CONF_FAN_API_KEY: Final = "fan_api_key"
 CONF_FAN_PHONE: Final = "fan_phone"
 
 CONF_CARGUS_PHONE: Final = "cargus_phone"
+CONF_CARGUS_EMAIL: Final = "cargus_email"
+CONF_CARGUS_PASSWORD: Final = "cargus_password"
 CONF_CARGUS_ACCESS_TOKEN: Final = "cargus_access_token"
 CONF_CARGUS_REFRESH_TOKEN: Final = "cargus_refresh_token"
 CONF_CARGUS_TOKEN_EXPIRES_AT: Final = "cargus_token_expires_at"
+CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT: Final = "cargus_refresh_token_expires_at"
 
 CONF_GLS_ACCESS_TOKEN: Final = "gls_access_token"
 CONF_GLS_REFRESH_TOKEN: Final = "gls_refresh_token"

@@ -13,6 +13,10 @@ class CourierProviderError(Exception):
     """Eroare controlata ridicata de un provider de curier."""
 
 
+class CourierProviderAuthError(CourierProviderError):
+    """Autentificarea providerului a expirat si necesita reconectare."""
+
+
 class CourierProvider(ABC):
     """Interfata comuna pentru toti providerii."""
 

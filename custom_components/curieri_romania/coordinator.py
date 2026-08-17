@@ -8,6 +8,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -21,6 +22,7 @@ from .const import (
     CONF_GLS_REFRESH_TOKEN,
     CONF_SAMEDAY_ACCESS_TOKEN,
     COURIER_CARGUS,
+    CARGUS_MAINTENANCE_INTERVAL,
     COURIER_FAN,
     COURIER_GLS,
     COURIER_SAMEDAY,
@@ -30,7 +32,7 @@ from .const import (
 from .models import ParcelSnapshot
 from .notify import async_handle_parcel_notifications
 from .license_access import async_courier_allowed_by_license
-from .providers import CargusProvider, CourierProvider, CourierProviderError, FanCourierProvider, GLSProvider, SamedayProvider
+from .providers import CargusProvider, CourierProvider, CourierProviderAuthError, CourierProviderError, FanCourierProvider, GLSProvider, SamedayProvider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +47,11 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=DEFAULT_SCAN_INTERVAL,
+            update_interval=(
+                CARGUS_MAINTENANCE_INTERVAL
+                if COURIER_CARGUS in entry.data.get(CONF_ENABLED_COURIERS, [])
+                else DEFAULT_SCAN_INTERVAL
+            ),
         )
         self.entry = entry
         self.providers: list[CourierProvider] = self._build_providers(hass, entry)
@@ -124,6 +130,13 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
                 provider_parcels = await provider.async_get_parcels()
                 parcels.extend(provider_parcels)
                 debug["providers"][provider.courier_code] = _provider_debug(provider, len(provider_parcels))
+            except CourierProviderAuthError as err:
+                debug["providers"][provider.courier_code] = _provider_debug(provider, 0, str(err))
+                _LOGGER.warning(
+                    "Autentificarea providerului %s a expirat; se porneste reautentificarea.",
+                    provider.courier_code,
+                )
+                raise ConfigEntryAuthFailed(str(err)) from err
             except CourierProviderError as err:
                 errors[provider.courier_code] = str(err)
                 debug["providers"][provider.courier_code] = _provider_debug(provider, 0, str(err))
