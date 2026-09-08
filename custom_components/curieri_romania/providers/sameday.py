@@ -247,17 +247,6 @@ class SamedayProvider(CourierProvider):
         self._debug_info["skipped_without_awb"] = skipped_without_awb
         self._debug_info["normalized_status_counts"] = _count_statuses(parcels)
 
-        _LOGGER.warning(
-            "[Curieri Romania][Sameday DIAG] token_present=%s refresh_present=%s dashboard=%s history_items=%s sent_items=%s parsed=%s skipped_without_awb=%s errors=%s",
-            self._debug_info.get("token_present"),
-            self._debug_info.get("refresh_token_present"),
-            dashboard_counts,
-            history_items_count,
-            sent_items_count,
-            len(parcels),
-            skipped_without_awb,
-            self._debug_info.get("last_error"),
-        )
         return parcels
 
     async def async_get_history(self, page_number: int = 1, page_size: int = 20) -> dict[str, Any]:

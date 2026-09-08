@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from pathlib import Path
@@ -17,7 +18,9 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import dispatcher_send
 
 from .const import (
+    CONF_ENTRY_TYPE,
     DOMAIN,
+    ENTRY_TYPE_ADMIN,
     NAME,
     PLATFORMS,
     SERVICE_REFRESH_LICENSE_STATUS,
@@ -152,10 +155,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await _async_register_dashboard_panel(hass)
 
-    coordinator = CurieriRomaniaCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
-
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_ADMIN:
+        # Intrarea administrativa expune doar entitati/setari globale si nu are
+        # nevoie de polling catre curieri. Evitam astfel un coordinator gol.
+        domain_data[entry.entry_id] = None
+    else:
+        coordinator = CurieriRomaniaCoordinator(hass, entry)
+        await coordinator.async_config_entry_first_refresh()
+        domain_data[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_license_services(hass, entry)
     _async_register_notification_services(hass)
@@ -178,57 +186,66 @@ async def _async_register_dashboard_panel(hass: HomeAssistant) -> None:
 
     global _PANEL_REGISTERED, _EXTERNAL_DONE_VIEW_REGISTERED, _TOKEN_RESULT_VIEW_REGISTERED
 
-    if not _TOKEN_RESULT_VIEW_REGISTERED:
-        hass.http.register_view(CurieriRomaniaTokenResultView())
-        _TOKEN_RESULT_VIEW_REGISTERED = True
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    panel_lock = domain_data.get("_panel_setup_lock")
+    if not isinstance(panel_lock, asyncio.Lock):
+        panel_lock = asyncio.Lock()
+        domain_data["_panel_setup_lock"] = panel_lock
 
-    if not _EXTERNAL_DONE_VIEW_REGISTERED:
-        hass.http.register_view(CurieriRomaniaExternalStepDoneView())
-        _EXTERNAL_DONE_VIEW_REGISTERED = True
+    # Config entry-urile pot fi initializate in paralel. Fara lock, fiecare
+    # intrare poate incerca sa inregistreze aceleasi resurse si acelasi panel.
+    async with panel_lock:
+        if not _TOKEN_RESULT_VIEW_REGISTERED:
+            hass.http.register_view(CurieriRomaniaTokenResultView())
+            _TOKEN_RESULT_VIEW_REGISTERED = True
 
-    if _PANEL_REGISTERED:
-        return
+        if not _EXTERNAL_DONE_VIEW_REGISTERED:
+            hass.http.register_view(CurieriRomaniaExternalStepDoneView())
+            _EXTERNAL_DONE_VIEW_REGISTERED = True
 
-    panel_file = Path(__file__).parent / "frontend" / "curieri-romania-panel.js"
-    if not panel_file.exists():
-        _LOGGER.warning("Panelul Curieri Romania nu a fost gasit: %s", panel_file)
-        return
+        if _PANEL_REGISTERED:
+            return
 
-    await _async_register_static_path(hass, _PANEL_STATIC_URL, str(panel_file))
+        panel_file = Path(__file__).parent / "frontend" / "curieri-romania-panel.js"
+        if not panel_file.exists():
+            _LOGGER.warning("Panelul Curieri Romania nu a fost gasit: %s", panel_file)
+            return
 
-    base_path = Path(__file__).parent
-    for url_path, relative_path in _HELPER_STATIC_PATHS.items():
-        helper_file = base_path / relative_path
-        if helper_file.exists():
-            await _async_register_static_path(hass, url_path, str(helper_file))
-        else:
-            _LOGGER.warning("Helperul Curieri Romania nu a fost gasit: %s", helper_file)
+        await _async_register_static_path(hass, _PANEL_STATIC_URL, str(panel_file))
 
-    for url_path, relative_path in _ASSET_STATIC_PATHS.items():
-        asset_file = base_path / relative_path
-        if asset_file.exists():
-            await _async_register_static_path(hass, url_path, str(asset_file))
-        else:
-            _LOGGER.warning("Assetul Curieri Romania nu a fost gasit: %s", asset_file)
+        base_path = Path(__file__).parent
+        for url_path, relative_path in _HELPER_STATIC_PATHS.items():
+            helper_file = base_path / relative_path
+            if helper_file.exists():
+                await _async_register_static_path(hass, url_path, str(helper_file))
+            else:
+                _LOGGER.warning("Helperul Curieri Romania nu a fost gasit: %s", helper_file)
 
-    try:
-        from homeassistant.components import panel_custom
+        for url_path, relative_path in _ASSET_STATIC_PATHS.items():
+            asset_file = base_path / relative_path
+            if asset_file.exists():
+                await _async_register_static_path(hass, url_path, str(asset_file))
+            else:
+                _LOGGER.warning("Assetul Curieri Romania nu a fost gasit: %s", asset_file)
 
-        result = panel_custom.async_register_panel(
-            hass,
-            webcomponent_name="curieri-romania-panel",
-            frontend_url_path=_PANEL_URL_PATH,
-            sidebar_title=NAME,
-            sidebar_icon="mdi:truck-delivery-outline",
-            module_url=_PANEL_STATIC_URL,
-            config={"domain": DOMAIN},
-            require_admin=False,
-        )
-        if inspect.isawaitable(result):
-            await result
-        _PANEL_REGISTERED = True
-    except Exception as err:  # pragma: no cover - protectie compatibilitate HA
-        _LOGGER.warning("Panelul Curieri Romania nu a putut fi inregistrat: %s", err)
+        try:
+            from homeassistant.components import panel_custom
+
+            result = panel_custom.async_register_panel(
+                hass,
+                webcomponent_name="curieri-romania-panel",
+                frontend_url_path=_PANEL_URL_PATH,
+                sidebar_title=NAME,
+                sidebar_icon="mdi:truck-delivery-outline",
+                module_url=_PANEL_STATIC_URL,
+                config={"domain": DOMAIN},
+                require_admin=False,
+            )
+            if inspect.isawaitable(result):
+                await result
+            _PANEL_REGISTERED = True
+        except Exception as err:  # pragma: no cover - protectie compatibilitate HA
+            _LOGGER.warning("Panelul Curieri Romania nu a putut fi inregistrat: %s", err)
 
 
 async def _async_register_static_path(hass: HomeAssistant, url_path: str, file_path: str) -> None:
@@ -237,22 +254,24 @@ async def _async_register_static_path(hass: HomeAssistant, url_path: str, file_p
     try:
         from homeassistant.components.http import StaticPathConfig
 
-        result = hass.http.async_register_static_paths(
-            [StaticPathConfig(url_path, file_path, True)]
-        )
-        if inspect.isawaitable(result):
-            await result
-        return
-    except Exception:
-        # Compatibilitate cu versiuni mai vechi Home Assistant.
-        pass
+        register_async = getattr(hass.http, "async_register_static_paths", None)
+        if register_async is not None:
+            await register_async([StaticPathConfig(url_path, file_path, True)])
+            return
 
-    try:
-        result = hass.http.register_static_path(url_path, file_path, True)
-        if inspect.isawaitable(result):
-            await result
+        # Compatibilitate stricta cu versiuni HA vechi, unde API-ul async nu
+        # exista. Nu apelam metoda veche ca fallback dupa o eroare a API-ului
+        # nou, deoarece aceasta a fost eliminata din Home Assistant modern.
+        register_legacy = getattr(hass.http, "register_static_path", None)
+        if register_legacy is not None:
+            result = register_legacy(url_path, file_path, True)
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        _LOGGER.warning("Home Assistant nu ofera un API compatibil pentru resursa statica %s", url_path)
     except Exception as err:  # pragma: no cover - protectie compatibilitate HA
-        _LOGGER.warning("Nu s-a putut inregistra resursa statica Curieri Romania: %s", err)
+        _LOGGER.warning("Nu s-a putut inregistra resursa statica Curieri Romania (%s): %s", url_path, err)
 
 
 def _async_register_license_services(hass: HomeAssistant, entry: ConfigEntry) -> None:

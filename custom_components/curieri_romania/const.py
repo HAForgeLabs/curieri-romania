@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "curieri_romania"
 NAME: Final = "Curieri Romania"
-VERSION: Final = "1.0.9"
+VERSION: Final = "1.0.12"
 
 PLATFORMS: Final = ["sensor", "button", "text"]
 
@@ -66,6 +66,7 @@ CONF_SAMEDAY_ID_TOKEN: Final = "sameday_id_token"
 CONF_SAMEDAY_TOKEN_EXPIRES_AT: Final = "sameday_token_expires_at"
 CONF_SAMEDAY_TOKEN_TYPE: Final = "sameday_token_type"
 CONF_SAMEDAY_SCOPE: Final = "sameday_scope"
+CONF_SAMEDAY_ACCOUNT_ID: Final = "sameday_account_id"
 
 CONF_FAN_USERNAME: Final = "fan_username"
 CONF_FAN_PASSWORD: Final = "fan_password"

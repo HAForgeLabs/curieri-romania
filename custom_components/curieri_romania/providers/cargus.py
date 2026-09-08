@@ -222,14 +222,6 @@ class CargusProvider(CourierProvider):
             else:
                 reason = "access_token_margin"
             self.debug_info["refresh_reason"] = reason
-            _LOGGER.warning(
-                "[CARGUS REFRESH DIAG] start reason=%s access_seconds_left=%s "
-                "grant_seconds_left=%s forced=%s",
-                reason,
-                round(seconds_left) if seconds_left is not None else None,
-                round(refresh_seconds_left) if refresh_seconds_left is not None else None,
-                force_refresh,
-            )
             try:
                 payload = await _async_refresh_cargus_token(self._session, refresh_token)
             except CargusTokenRefreshError as err:
@@ -306,18 +298,6 @@ class CargusProvider(CourierProvider):
                     "refresh_token_fingerprint_after": _token_fingerprint(new_refresh_token),
                 }
             )
-            _LOGGER.warning(
-                "[CARGUS REFRESH DIAG] success reason=%s status=200 "
-                "access_expires_in=%s grant_declared=%s grant_effective=%s "
-                "grant_source=%s refresh_token_rotated=%s next_refresh_in=%s",
-                reason,
-                expires_in,
-                declared_refresh_expires_in,
-                refresh_expires_in,
-                refresh_expiry_source,
-                rotated,
-                next_refresh_in,
-            )
             return access_token
 
 
@@ -334,7 +314,7 @@ class CargusProvider(CourierProvider):
             )
         except Exception as err:  # autentificarea completa poate esua din motive externe
             _LOGGER.warning(
-                "[CARGUS FULL LOGIN DIAG] failed reason=%s error_type=%s",
+                "Reautentificarea completa Cargus a esuat: reason=%s error_type=%s",
                 reason, type(err).__name__,
             )
             return None
@@ -345,9 +325,6 @@ class CargusProvider(CourierProvider):
         new_data = dict(self.entry.data)
         new_data.update(token_data)
         self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-        _LOGGER.warning(
-            "[CARGUS FULL LOGIN DIAG] success reason=%s token_rotated=True", reason
-        )
         self.debug_info.update({
             "token_source": "full_login",
             "full_login_success": True,

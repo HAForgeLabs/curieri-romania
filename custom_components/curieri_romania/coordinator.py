@@ -119,11 +119,6 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
 
         if not self.providers:
             debug["warning"] = "no_active_provider"
-            _LOGGER.warning(
-                "[Curieri Romania][DIAG] entry=%s nu are niciun provider activ. sameday_token_present=%s",
-                self.entry.title,
-                debug["sameday_token_present"],
-            )
 
         for provider in self.providers:
             try:
@@ -148,13 +143,6 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
 
         debug["total_parcels"] = len(parcels)
         debug["errors"] = errors
-        _LOGGER.warning(
-            "[Curieri Romania][DIAG] entry=%s providers=%s total_parcels=%s errors=%s",
-            self.entry.title,
-            debug["providers_configured"],
-            len(parcels),
-            errors,
-        )
 
         snapshot = ParcelSnapshot(
             parcels=tuple(parcels),

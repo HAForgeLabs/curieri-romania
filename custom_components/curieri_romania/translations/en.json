@@ -127,7 +127,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Sameday cannot be contacted or authentication is not accepted. Check Home Assistant logs for [SAMEDAY AUTH DIAG].",
+      "cannot_connect": "Sameday cannot be contacted or authentication is not accepted. Try again or reconnect the account.",
       "missing_code": "The entered URL does not contain the authentication code.",
       "invalid_state": "The authentication session does not match. Restart the process.",
       "unsupported_courier": "The selected courier is not active yet in this version.",
@@ -136,12 +136,13 @@
       "invalid_auth_fan": "FAN Courier authentication failed. Check the username and password.",
       "cannot_connect_fan": "FAN Courier cannot be reached right now. It can be retried automatically or manually.",
       "invalid_auth_cargus": "Cargus authentication failed. Check the email, password, phone or refresh token.",
-      "cannot_connect_cargus": "Cargus cannot be reached or the authentication is not accepted. Check Home Assistant logs for [CARGUS AUTH DIAG].",
+      "cannot_connect_cargus": "Cargus cannot be reached or the authentication is not accepted. Try again or reconnect the account.",
       "invalid_auth_gls": "GLS authentication failed. Check the email and password or refresh token.",
-      "cannot_connect_gls": "GLS cannot be reached right now or the authentication flow was not accepted. Check Home Assistant logs for [GLS AUTH DIAG]."
+      "cannot_connect_gls": "GLS cannot be reached right now or the authentication flow was not accepted. Try again or reconnect the account."
     },
     "abort": {
-      "already_configured": "This entry is already configured. To reconnect, remove the existing entry and add it again."
+      "already_configured": "This entry is already configured. To reconnect, remove the existing entry and add it again.",
+      "cannot_identify_account": "The Sameday account could not be identified safely. Try authentication again or use the recommended phone and password method."
     }
   },
   "entity": {

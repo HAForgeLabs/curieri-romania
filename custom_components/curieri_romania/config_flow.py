@@ -45,6 +45,7 @@ from .const import (
     CONF_SAMEDAY_ID_TOKEN,
     CONF_SAMEDAY_REFRESH_TOKEN,
     CONF_SAMEDAY_SCOPE,
+    CONF_SAMEDAY_ACCOUNT_ID,
     CONF_SAMEDAY_TOKEN_EXPIRES_AT,
     CONF_SAMEDAY_TOKEN_TYPE,
     COURIER_CARGUS,
@@ -224,8 +225,11 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if courier not in SUPPORTED_COURIERS:
                 return await self.async_step_unsupported()
 
-            await self.async_set_unique_id(f"{DOMAIN}_{courier}")
-            self._abort_if_unique_id_configured()
+            # Sameday permite mai multe conturi. Unique ID-ul este stabilit
+            # dupa autentificare, pe baza identitatii contului.
+            if courier != COURIER_SAMEDAY:
+                await self.async_set_unique_id(f"{DOMAIN}_{courier}")
+                self._abort_if_unique_id_configured()
 
             if courier == COURIER_SAMEDAY:
                 return await self.async_step_sameday_auth_method()
@@ -675,7 +679,9 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self._async_create_or_update_sameday_entry(data)
+                    return await self._async_create_or_update_sameday_entry(
+                        data, account_hint=phone
+                    )
 
         schema = vol.Schema(
             {
@@ -736,7 +742,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self._async_create_or_update_sameday_entry(data)
+                    return await self._async_create_or_update_sameday_entry(data)
 
         default_token = self._default_sameday_refresh_token or ""
         schema = vol.Schema(
@@ -781,7 +787,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
                         **token_data,
                     }
-                    return self._async_create_or_update_sameday_entry(data)
+                    return await self._async_create_or_update_sameday_entry(data)
 
         schema = vol.Schema(
             {
@@ -847,10 +853,33 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_ENABLED_COURIERS: [COURIER_SAMEDAY],
             **token_data,
         }
-        return self._async_create_or_update_sameday_entry(data)
+        return await self._async_create_or_update_sameday_entry(data)
 
-    def _async_create_or_update_sameday_entry(self, data: dict[str, Any]) -> FlowResult:
-        """Creeaza intrarea Sameday sau finalizeaza reautentificarea existenta."""
+    async def _async_create_or_update_sameday_entry(
+        self, data: dict[str, Any], account_hint: str | None = None
+    ) -> FlowResult:
+        """Creeaza/reautentifica un cont Sameday, permitand mai multe conturi."""
+
+        account_id = _derive_sameday_account_id(data, account_hint)
+        if not account_id:
+            return self.async_abort(reason="cannot_identify_account")
+
+        current_entry_id = self._reauth_entry.entry_id if self._reauth_entry else None
+        for entry in self._async_current_entries():
+            if entry.entry_id == current_entry_id:
+                continue
+            if entry.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_COURIER:
+                continue
+            if str(entry.data.get(CONF_COURIER, "")) != COURIER_SAMEDAY:
+                continue
+
+            existing_account_id = str(
+                entry.data.get(CONF_SAMEDAY_ACCOUNT_ID, "")
+            ).strip() or _derive_sameday_account_id(dict(entry.data))
+            if existing_account_id and existing_account_id == account_id:
+                return self.async_abort(reason="already_configured")
+
+        data[CONF_SAMEDAY_ACCOUNT_ID] = account_id
 
         if self._reauth_entry is not None:
             return self.async_update_reload_and_abort(
@@ -858,6 +887,22 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_updates=data,
                 reason="reauth_successful",
             )
+
+        await self.async_set_unique_id(
+            f"{DOMAIN}_{COURIER_SAMEDAY}_{account_id}"
+        )
+        self._abort_if_unique_id_configured()
+
+        sameday_count = sum(
+            1
+            for entry in self._async_current_entries()
+            if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_COURIER
+            and str(entry.data.get(CONF_COURIER, "")) == COURIER_SAMEDAY
+        )
+        if sameday_count:
+            self._entry_title = f"{COURIER_NAMES[COURIER_SAMEDAY]} {sameday_count + 1}"
+            data[CONF_INSTANCE_NAME] = self._entry_title
+
         return self.async_create_entry(title=self._entry_title, data=data)
 
     async def _async_try_create_cargus_entry(self, phone: str, refresh_token: str) -> FlowResult | None:
@@ -1077,7 +1122,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise
         except Exception as err:  # pragma: no cover - protectie runtime HA
             _LOGGER.warning(
-                "[CARGUS AUTH DIAG] step=unexpected error_type=%s",
+                "Autentificarea Cargus a esuat neasteptat: %s",
                 type(err).__name__,
             )
             raise ValueError("cannot_connect_cargus") from err
@@ -1173,7 +1218,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise
         except Exception as err:  # pragma: no cover - protectie runtime HA
             _LOGGER.warning(
-                "[SAMEDAY AUTH DIAG] step=unexpected error_type=%s",
+                "Autentificarea Sameday a esuat neasteptat: %s",
                 type(err).__name__,
             )
             raise ValueError("cannot_connect") from err
@@ -1249,7 +1294,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise
         except Exception as err:  # pragma: no cover - protectie runtime HA
             _LOGGER.warning(
-                "[GLS AUTH DIAG] step=unexpected error_type=%s",
+                "Autentificarea GLS a esuat neasteptat: %s",
                 type(err).__name__,
             )
             raise ValueError("cannot_connect_gls") from err
@@ -1374,6 +1419,64 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 
+
+def _decode_jwt_payload(token: str | None) -> dict[str, Any]:
+    """Decodeaza doar payload-ul JWT pentru identificarea locala a contului."""
+
+    value = str(token or "").strip()
+    parts = value.split(".")
+    if len(parts) < 2:
+        return {}
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
+        result = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _derive_sameday_account_id(
+    data: dict[str, Any], account_hint: str | None = None
+) -> str:
+    """Obtine un identificator stabil, pseudonimizat, pentru un cont Sameday."""
+
+    claim_keys = (
+        "sub",
+        "oid",
+        "user_id",
+        "userId",
+        "phone_number",
+        "preferred_username",
+        "email",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+    )
+    for token_key in (CONF_SAMEDAY_ID_TOKEN, CONF_SAMEDAY_ACCESS_TOKEN):
+        claims = _decode_jwt_payload(data.get(token_key))
+        for key in claim_keys:
+            value = str(claims.get(key) or "").strip().lower()
+            if value:
+                return hashlib.sha256(
+                    f"sameday|claim|{value}".encode("utf-8")
+                ).hexdigest()[:20]
+
+    hint = str(account_hint or "").strip().lower()
+    if hint:
+        normalized_hint = re.sub(r"\s+", "", hint)
+        return hashlib.sha256(
+            f"sameday|hint|{normalized_hint}".encode("utf-8")
+        ).hexdigest()[:20]
+
+    # Fallback pentru metoda avansata cu refresh token, daca tokenurile nu sunt JWT.
+    # Tokenul nu este stocat in identificator; se foloseste numai hash-ul sau.
+    refresh_token = str(data.get(CONF_SAMEDAY_REFRESH_TOKEN) or "").strip()
+    if refresh_token:
+        return hashlib.sha256(
+            f"sameday|token|{refresh_token}".encode("utf-8")
+        ).hexdigest()[:20]
+    return ""
+
+
 def _mask_sameday_value(value: str, keep: int = 12) -> str:
     """Mascheaza valori sensibile pentru loguri Sameday."""
 
@@ -1394,14 +1497,9 @@ def _mask_sameday_phone(value: str) -> str:
 
 
 def _sameday_log_diag(step: str, *, status: int | None = None, detail: str | None = None) -> None:
-    """Scrie diagnostic Sameday sigur, fara parole/tokenuri."""
+    """Pastreaza compatibilitatea fluxului fara a genera loguri de diagnostic."""
 
-    parts = [f"step={step}"]
-    if status is not None:
-        parts.append(f"status={status}")
-    if detail:
-        parts.append(f"detail={detail}")
-    _LOGGER.warning("[SAMEDAY AUTH DIAG] %s", " ".join(parts))
+    return None
 
 
 def _normalize_sameday_phone(raw: str) -> tuple[str, str]:
@@ -1666,11 +1764,6 @@ def _sync_login_sameday_with_password(phone: str, password: str) -> dict[str, An
         raise ValueError("cannot_connect")
 
     expires_in = int(token_json.get("expires_in", 3600))
-    _LOGGER.warning(
-        "[SAMEDAY AUTH DIAG] step=success phone=%s expires_in=%s",
-        _mask_sameday_phone(phone),
-        expires_in,
-    )
     return {
         CONF_SAMEDAY_ACCESS_TOKEN: access_token,
         CONF_SAMEDAY_REFRESH_TOKEN: refresh_token,
@@ -1702,14 +1795,9 @@ def _mask_cargus_email(value: str) -> str:
 
 
 def _cargus_log_diag(step: str, *, status: int | None = None, detail: str | None = None) -> None:
-    """Scrie diagnostic Cargus sigur, fara parole/tokenuri."""
+    """Pastreaza compatibilitatea fluxului fara a genera loguri de diagnostic."""
 
-    parts = [f"step={step}"]
-    if status is not None:
-        parts.append(f"status={status}")
-    if detail:
-        parts.append(f"detail={detail}")
-    _LOGGER.warning("[CARGUS AUTH DIAG] %s", " ".join(parts))
+    return None
 
 
 def _sync_login_cargus_with_password(email_value: str, password: str) -> dict[str, Any]:
@@ -1928,12 +2016,6 @@ def _sync_login_cargus_with_password(email_value: str, password: str) -> dict[st
     refresh_expires_in, refresh_expiry_source = _cargus_effective_refresh_lifetime(
         refresh_token, declared_refresh_expires_in
     )
-    _LOGGER.warning(
-        "[CARGUS AUTH DIAG] step=success email=%s expires_in=%s refresh_expires_in=%s",
-        safe_email,
-        expires_in,
-        declared_refresh_expires_in,
-    )
     token_data = {
         CONF_CARGUS_ACCESS_TOKEN: f"Bearer {access_token}",
         CONF_CARGUS_REFRESH_TOKEN: refresh_token,
@@ -2063,14 +2145,9 @@ def _mask_gls_email(value: str) -> str:
 
 
 def _gls_log_diag(step: str, *, status: int | None = None, detail: str | None = None) -> None:
-    """Scrie diagnostic GLS sigur, fara parole/tokenuri."""
+    """Pastreaza compatibilitatea fluxului fara a genera loguri de diagnostic."""
 
-    parts = [f"step={step}"]
-    if status is not None:
-        parts.append(f"status={status}")
-    if detail:
-        parts.append(f"detail={detail}")
-    _LOGGER.warning("[GLS AUTH DIAG] %s", " ".join(parts))
+    return None
 
 
 def _sync_login_gls_with_password(email_value: str, password: str) -> dict[str, Any]:
@@ -2339,7 +2416,6 @@ def _sync_login_gls_with_password(email_value: str, password: str) -> dict[str, 
         raise ValueError("cannot_connect_gls")
 
     expires_in = int(token_json.get("expires_in", 86400))
-    _LOGGER.warning("[GLS AUTH DIAG] step=success email=%s expires_in=%s", safe_email, expires_in)
     return {
         CONF_GLS_ACCESS_TOKEN: access_token,
         CONF_GLS_REFRESH_TOKEN: refresh_token,

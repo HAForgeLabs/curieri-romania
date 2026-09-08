@@ -127,7 +127,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Sameday nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [SAMEDAY AUTH DIAG].",
+      "cannot_connect": "Sameday nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul.",
       "missing_code": "URL-ul introdus nu contine codul de autentificare.",
       "invalid_state": "Sesiunea de autentificare nu corespunde. Reincearca procesul.",
       "unsupported_courier": "Curierul selectat nu este activ inca in aceasta versiune.",
@@ -136,12 +136,13 @@
       "invalid_auth_fan": "Autentificare FAN Courier esuata. Verifica username-ul si parola.",
       "cannot_connect_fan": "FAN Courier nu poate fi contactat momentan. Se va putea reincerca automat sau manual.",
       "invalid_auth_cargus": "Autentificare Cargus esuata. Verifica emailul, parola, telefonul sau refresh tokenul.",
-      "cannot_connect_cargus": "Cargus nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [CARGUS AUTH DIAG].",
+      "cannot_connect_cargus": "Cargus nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul.",
       "invalid_auth_gls": "Autentificare GLS esuata. Verifica emailul si parola sau refresh tokenul.",
-      "cannot_connect_gls": "GLS nu poate fi contactat momentan sau autentificarea nu este acceptata. Verifica logurile Home Assistant pentru [GLS AUTH DIAG]."
+      "cannot_connect_gls": "GLS nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul."
     },
     "abort": {
-      "already_configured": "Aceasta intrare este deja configurata. Pentru reconectare, sterge intrarea existenta si adaug-o din nou."
+      "already_configured": "Aceasta intrare este deja configurata. Pentru reconectare, sterge intrarea existenta si adaug-o din nou.",
+      "cannot_identify_account": "Nu s-a putut identifica in siguranta contul Sameday. Reincearca autentificarea sau foloseste metoda recomandata cu telefon si parola."
     }
   },
   "entity": {
