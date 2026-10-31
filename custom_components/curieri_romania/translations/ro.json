@@ -9,9 +9,10 @@
       },
       "service": {
         "title": "Adauga serviciu de curierat",
-        "description": "Alege curierul pe care vrei sa il adaugi. Poti reveni oricand la Integrari -> Adauga hub -> Curieri Romania pentru a adauga un alt curier.",
+        "description": "Alege curierul si, optional, un nume pentru cont. Poti adauga mai multe conturi distincte pentru acelasi curier.",
         "data": {
-          "courier": "Curier"
+          "courier": "Curier",
+          "instance_name": "Nume cont (optional, de exemplu GLS sotie)"
         }
       },
       "unsupported": {
@@ -138,11 +139,17 @@
       "invalid_auth_cargus": "Autentificare Cargus esuata. Verifica emailul, parola, telefonul sau refresh tokenul.",
       "cannot_connect_cargus": "Cargus nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul.",
       "invalid_auth_gls": "Autentificare GLS esuata. Verifica emailul si parola sau refresh tokenul.",
-      "cannot_connect_gls": "GLS nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul."
+      "cannot_connect_gls": "GLS nu poate fi contactat momentan sau autentificarea nu este acceptata. Incearca din nou sau reconecteaza contul.",
+      "cannot_identify_courier_account": "Nu s-a putut identifica in siguranta contul. Reincearca folosind metoda cu username/email si parola."
     },
     "abort": {
-      "already_configured": "Aceasta intrare este deja configurata. Pentru reconectare, sterge intrarea existenta si adaug-o din nou.",
-      "cannot_identify_account": "Nu s-a putut identifica in siguranta contul Sameday. Reincearca autentificarea sau foloseste metoda recomandata cu telefon si parola."
+      "already_configured": "Acest cont este deja configurat. Poti adauga un alt cont al aceluiasi curier.",
+      "cannot_identify_account": "Nu s-a putut identifica in siguranta contul Sameday. Reincearca autentificarea sau foloseste metoda recomandata cu telefon si parola.",
+      "reauth_successful": "Reautentificare finalizata. Contul a fost reconectat.",
+      "reauth_entry_missing": "Configurarea de reconectat nu mai exista.",
+      "reauth_not_supported": "Acest curier nu suporta reautentificarea.",
+      "cannot_identify_courier_account": "Nu s-a putut identifica in siguranta contul. Reincearca folosind metoda cu username/email si parola.",
+      "wrong_account": "Ai autentificat un alt cont. Reconecteaza contul acestei intrari; pentru alt cont foloseste Adauga hub."
     }
   },
   "entity": {

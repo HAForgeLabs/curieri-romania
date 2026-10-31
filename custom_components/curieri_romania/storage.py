@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -9,7 +10,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import STORAGE_KEY_NOTIFICATIONS, STORAGE_VERSION_NOTIFICATIONS
+from .const import DOMAIN, STORAGE_KEY_NOTIFICATIONS, STORAGE_VERSION_NOTIFICATIONS
+from .notification_routes import TARGET_FIELDS, ROUTE_MODES, normalize_target, sanitize_routes
 
 DEFAULT_NOTIFICATION_HISTORY_RETENTION_DAYS = 180
 DEFAULT_NOTIFICATION_HISTORY_MAX_STATES = 500
@@ -52,9 +54,19 @@ def _state_datetime(state: dict[str, Any]) -> datetime | None:
 class CurieriRomaniaNotificationStore:
     """Stocheaza local statusurile deja procesate pentru notificari."""
 
+    def __new__(cls, hass: HomeAssistant):
+        cache = hass.data.setdefault(DOMAIN, {})
+        if "notification_state_store" not in cache:
+            cache["notification_state_store"] = super().__new__(cls)
+        return cache["notification_state_store"]
+
     def __init__(self, hass: HomeAssistant) -> None:
         """Initializeaza store-ul Home Assistant."""
 
+        if hasattr(self, "_store"):
+            return
+        self._load_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
         self._store: Store = Store(
             hass,
             STORAGE_VERSION_NOTIFICATIONS,
@@ -62,6 +74,7 @@ class CurieriRomaniaNotificationStore:
         )
         self._data: dict[str, Any] = {
             "initialized": False,
+            "initialized_accounts": [],
             "parcels": {},
             "last_cleanup_at": "",
             "last_cleanup_removed": 0,
@@ -69,6 +82,10 @@ class CurieriRomaniaNotificationStore:
         self._loaded = False
 
     async def async_load(self) -> None:
+        async with self._load_lock:
+            await self._async_load_once()
+
+    async def _async_load_once(self) -> None:
         """Incarca datele salvate local."""
 
         if self._loaded:
@@ -79,6 +96,7 @@ class CurieriRomaniaNotificationStore:
             parcels = data.get("parcels")
             self._data = {
                 "initialized": bool(data.get("initialized", False)),
+                "initialized_accounts": data.get("initialized_accounts") if isinstance(data.get("initialized_accounts"), list) else [],
                 "parcels": parcels if isinstance(parcels, dict) else {},
                 "last_cleanup_at": str(data.get("last_cleanup_at") or ""),
                 "last_cleanup_removed": int(data.get("last_cleanup_removed") or 0),
@@ -86,10 +104,12 @@ class CurieriRomaniaNotificationStore:
 
         self._loaded = True
 
-    async def async_is_initialized(self) -> bool:
+    async def async_is_initialized(self, entry_id: str = "") -> bool:
         """Returneaza daca prima scanare a fost deja memorata."""
 
         await self.async_load()
+        if entry_id:
+            return entry_id in self._data.get("initialized_accounts", [])
         return bool(self._data.get("initialized", False))
 
     async def async_get_parcel_state(self, key: str) -> dict[str, Any] | None:
@@ -232,11 +252,16 @@ class CurieriRomaniaNotificationStore:
             "last_cleanup_removed": int(self._data.get("last_cleanup_removed") or 0),
         }
 
-    async def async_mark_initialized(self) -> None:
+    async def async_mark_initialized(self, entry_id: str = "") -> None:
         """Marcheaza store-ul ca initializat."""
 
         await self.async_load()
-        if self._data.get("initialized"):
+        if entry_id:
+            entries = self._data.setdefault("initialized_accounts", [])
+            if entry_id in entries:
+                return
+            entries.append(entry_id)
+        elif self._data.get("initialized"):
             return
         self._data["initialized"] = True
         await self._store.async_save(self._data)
@@ -251,6 +276,9 @@ class CurieriRomaniaNotificationStore:
 DEFAULT_NOTIFICATION_SETTINGS: dict[str, Any] = {
     "notifications_enabled": True,
     "notify_service": "",
+    "notify_service_2": "",
+    "notify_service_3": "",
+    "account_routes": {},
     "notify_new_parcel": True,
     "notify_status_change": True,
     "notify_out_for_delivery": True,
@@ -269,11 +297,21 @@ DEFAULT_NOTIFICATION_SETTINGS: dict[str, Any] = {
 class CurieriRomaniaNotificationSettingsStore:
     """Stocheaza local setarile pentru notificari."""
 
+    def __new__(cls, hass: HomeAssistant):
+        cache = hass.data.setdefault(DOMAIN, {})
+        if "notification_settings_store" not in cache:
+            cache["notification_settings_store"] = super().__new__(cls)
+        return cache["notification_settings_store"]
+
     def __init__(self, hass: HomeAssistant) -> None:
         """Initializeaza store-ul Home Assistant pentru setari."""
 
         from .const import STORAGE_KEY_NOTIFICATION_SETTINGS, STORAGE_VERSION_NOTIFICATION_SETTINGS
 
+        if hasattr(self, "_store"):
+            return
+        self._load_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
         self._store: Store = Store(
             hass,
             STORAGE_VERSION_NOTIFICATION_SETTINGS,
@@ -283,6 +321,10 @@ class CurieriRomaniaNotificationSettingsStore:
         self._loaded = False
 
     async def async_load(self) -> None:
+        async with self._load_lock:
+            await self._async_load_once()
+
+    async def _async_load_once(self) -> None:
         """Incarca setarile salvate local."""
 
         if self._loaded:
@@ -295,7 +337,9 @@ class CurieriRomaniaNotificationSettingsStore:
                 if key not in data:
                     continue
                 value = data.get(key)
-                if isinstance(default_value, bool):
+                if isinstance(default_value, dict):
+                    settings[key] = sanitize_routes(value)
+                elif isinstance(default_value, bool):
                     settings[key] = bool(value)
                 else:
                     settings[key] = str(value or "").strip()
@@ -309,32 +353,45 @@ class CurieriRomaniaNotificationSettingsStore:
         return deepcopy(self._data)
 
     async def async_update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """Actualizeaza setarile primite si le salveaza."""
-
-        await self.async_load()
-        for key, default_value in DEFAULT_NOTIFICATION_SETTINGS.items():
-            if key not in updates or key.startswith("last_notification_"):
-                continue
-            value = updates.get(key)
-            if isinstance(default_value, bool):
-                self._data[key] = bool(value)
+        """Valideaza si salveaza fie destinatii globale, fie un singur cont."""
+        async with self._write_lock:
+            await self.async_load()
+            clean = {field: normalize_target(updates[field]) for field in TARGET_FIELDS if field in updates}
+            entry_id = str(updates.get("account_entry_id") or "").strip()
+            if entry_id:
+                mode = str(updates.get("notify_mode") or "inherit")
+                if mode not in ROUTE_MODES:
+                    raise ValueError("Modul de notificare nu este valid.")
+                routes = self._data.setdefault("account_routes", {})
+                previous = routes.get(entry_id, {})
+                route = {"mode": mode, **{field: clean.get(field, previous.get(field, "")) for field in TARGET_FIELDS}}
+                routes[entry_id] = route
             else:
-                self._data[key] = str(value or "").strip()
-        await self._store.async_save(self._data)
-        return deepcopy(self._data)
+                for key, default in DEFAULT_NOTIFICATION_SETTINGS.items():
+                    if key not in updates or key.startswith("last_notification_") or key == "account_routes":
+                        continue
+                    if key in TARGET_FIELDS:
+                        self._data[key] = clean[key]
+                    elif isinstance(default, bool):
+                        self._data[key] = bool(updates[key])
+                    else:
+                        self._data[key] = str(updates[key] or "").strip()
+            await self._store.async_save(self._data)
+            return deepcopy(self._data)
 
     async def async_update_diagnostics(self, updates: dict[str, Any]) -> dict[str, Any]:
         """Actualizeaza informatiile de diagnostic pentru notificari."""
 
-        await self.async_load()
-        for key in (
-            "last_notification_at",
-            "last_notification_title",
-            "last_notification_target",
-            "last_notification_result",
-            "last_notification_error",
-        ):
-            if key in updates:
-                self._data[key] = str(updates.get(key) or "").strip()
-        await self._store.async_save(self._data)
-        return deepcopy(self._data)
+        async with self._write_lock:
+            await self.async_load()
+            for key in (
+                "last_notification_at",
+                "last_notification_title",
+                "last_notification_target",
+                "last_notification_result",
+                "last_notification_error",
+            ):
+                if key in updates:
+                    self._data[key] = str(updates.get(key) or "").strip()
+            await self._store.async_save(self._data)
+            return deepcopy(self._data)

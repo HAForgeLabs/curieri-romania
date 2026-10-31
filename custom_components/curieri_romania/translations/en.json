@@ -9,9 +9,10 @@
       },
       "service": {
         "title": "Add courier service",
-        "description": "Choose the courier service you want to add. You can return anytime to Integrations -> Add hub -> Curieri Romania to add another courier.",
+        "description": "Choose the courier and an optional account name. You can add multiple distinct accounts for the same courier.",
         "data": {
-          "courier": "Courier"
+          "courier": "Courier",
+          "instance_name": "Account name (optional, for example GLS family)"
         }
       },
       "unsupported": {
@@ -138,11 +139,17 @@
       "invalid_auth_cargus": "Cargus authentication failed. Check the email, password, phone or refresh token.",
       "cannot_connect_cargus": "Cargus cannot be reached or the authentication is not accepted. Try again or reconnect the account.",
       "invalid_auth_gls": "GLS authentication failed. Check the email and password or refresh token.",
-      "cannot_connect_gls": "GLS cannot be reached right now or the authentication flow was not accepted. Try again or reconnect the account."
+      "cannot_connect_gls": "GLS cannot be reached right now or the authentication flow was not accepted. Try again or reconnect the account.",
+      "cannot_identify_courier_account": "The account could not be identified safely. Retry with username/email and password."
     },
     "abort": {
-      "already_configured": "This entry is already configured. To reconnect, remove the existing entry and add it again.",
-      "cannot_identify_account": "The Sameday account could not be identified safely. Try authentication again or use the recommended phone and password method."
+      "already_configured": "This account is already configured. You can add a different account for the same courier.",
+      "cannot_identify_account": "The Sameday account could not be identified safely. Try authentication again or use the recommended phone and password method.",
+      "reauth_successful": "Reauthentication successful. The account has been reconnected.",
+      "reauth_entry_missing": "The entry to reconnect no longer exists.",
+      "reauth_not_supported": "This courier does not support reauthentication.",
+      "cannot_identify_courier_account": "The account could not be identified safely. Retry with username/email and password.",
+      "wrong_account": "A different account was authenticated. Reconnect this entry using its original account; use Add hub for another account."
     }
   },
   "entity": {

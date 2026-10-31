@@ -4,7 +4,13 @@ refresh_license_status:
 
 send_test_notification:
   name: Trimite notificare de test
-  description: Trimite o notificare simpla de test prin serviciul de notificare configurat.
+  description: Trimite un test la destinatiile globale sau ale unui cont, fara date reale.
+  fields:
+    account_entry_id:
+      name: Cont de curier
+      description: ID-ul intrarii; gol foloseste destinatiile globale.
+      selector:
+        text:
 
 simulate_new_parcel_notification:
   name: Simuleaza colet nou
@@ -32,6 +38,29 @@ update_notification_settings:
       description: Serviciul Home Assistant folosit pentru trimiterea notificarilor.
       selector:
         text:
+    notify_service_2:
+      name: Telefon 2
+      description: A doua destinatie notify, optionala.
+      selector:
+        text:
+    notify_service_3:
+      name: Telefon 3
+      description: A treia destinatie notify, optionala.
+      selector:
+        text:
+    account_entry_id:
+      name: Cont de curier
+      description: Gol modifica setarile globale; completat modifica doar ruta acestui cont.
+      selector:
+        text:
+    notify_mode:
+      name: Destinatii cont
+      selector:
+        select:
+          options:
+            - inherit
+            - custom
+            - disabled
     notify_new_parcel:
       name: Notificare colet nou
       description: Trimite notificare cand apare un colet nou.

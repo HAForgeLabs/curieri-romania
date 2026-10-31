@@ -22,7 +22,11 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
 
+from .accounts import identify_account, same_account
 from .const import (
+    CONF_ACCOUNT_ID,
+    CONF_ACCOUNT_ALIASES,
+    CONF_FAN_USER_ID,
     ADMIN_ENTRY_TITLE,
     ADMIN_UNIQUE_ID,
     CONF_COURIER,
@@ -59,6 +63,7 @@ from .const import (
     NAME,
     SUPPORTED_COURIERS,
 )
+from .providers.base import CourierProviderAuthError, CourierProviderError
 from .providers.cargus import (
     CARGUS_API_BASE,
     CARGUS_CLIENT_ID,
@@ -170,7 +175,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="reauth_entry_missing")
 
         courier = str(entry.data.get(CONF_COURIER, ""))
-        if courier not in {COURIER_CARGUS, COURIER_SAMEDAY}:
+        if courier not in {COURIER_CARGUS, COURIER_SAMEDAY, COURIER_GLS, COURIER_FAN}:
             return self.async_abort(reason="reauth_not_supported")
 
         self._reauth_entry = entry
@@ -179,6 +184,11 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if courier == COURIER_SAMEDAY:
             return await self.async_step_sameday_auth_method()
+
+        if courier == COURIER_GLS:
+            return await self.async_step_gls_auth_method()
+        if courier == COURIER_FAN:
+            return await self.async_step_fan_credentials()
 
         self._cargus_phone = str(entry.data.get(CONF_CARGUS_PHONE, "")).strip()
         return await self.async_step_cargus_auth_method()
@@ -220,17 +230,12 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             courier = str(user_input[CONF_COURIER])
             self._courier = courier
-            self._entry_title = COURIER_NAMES.get(courier, NAME)
+            self._entry_title = str(user_input.get(CONF_INSTANCE_NAME) or "").strip() or COURIER_NAMES.get(courier, NAME)
 
             if courier not in SUPPORTED_COURIERS:
                 return await self.async_step_unsupported()
 
-            # Sameday permite mai multe conturi. Unique ID-ul este stabilit
-            # dupa autentificare, pe baza identitatii contului.
-            if courier != COURIER_SAMEDAY:
-                await self.async_set_unique_id(f"{DOMAIN}_{courier}")
-                self._abort_if_unique_id_configured()
-
+            # Identitatea fiecarui cont se stabileste dupa autentificare.
             if courier == COURIER_SAMEDAY:
                 return await self.async_step_sameday_auth_method()
             if courier == COURIER_FAN:
@@ -251,6 +256,9 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         COURIER_CARGUS: COURIER_NAMES[COURIER_CARGUS],
                         COURIER_GLS: COURIER_NAMES[COURIER_GLS],
                     }
+                ),
+                vol.Optional(CONF_INSTANCE_NAME): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
                 ),
             }
         )
@@ -277,7 +285,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 try:
-                    await self._async_validate_fan_login(username, password, FAN_API_KEY)
+                    user_id = await self._async_validate_fan_login(username, password, FAN_API_KEY)
                 except ValueError as err:
                     errors["base"] = str(err)
                 except Exception:  # pragma: no cover - protectie runtime HA
@@ -290,8 +298,9 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_FAN],
                         CONF_FAN_USERNAME: username,
                         CONF_FAN_PASSWORD: password,
+                        CONF_FAN_USER_ID: user_id,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return await self._async_create_or_update_account_entry(COURIER_FAN, data)
 
         schema = vol.Schema(
             {
@@ -382,7 +391,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_CARGUS_PASSWORD: password,
                         **validated_data,
                     }
-                    return self._async_create_or_update_cargus_entry(data)
+                    return await self._async_create_or_update_account_entry(COURIER_CARGUS, data)
 
         schema = vol.Schema(
             {
@@ -493,9 +502,6 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             method = str(user_input.get(FIELD_GLS_AUTH_METHOD, METHOD_GLS_EMAIL_PASSWORD))
             if method == METHOD_GLS_REFRESH_TOKEN:
                 return await self.async_step_gls_credentials()
-            if method == METHOD_GLS_BROWSER:
-                self._prepare_gls_authorization()
-                return await self.async_step_gls_oauth()
             return await self.async_step_gls_login()
 
         schema = vol.Schema(
@@ -504,7 +510,6 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     {
                         METHOD_GLS_EMAIL_PASSWORD: "Email si parola GLS (recomandat)",
                         METHOD_GLS_REFRESH_TOKEN: "Refresh token GLS manual (avansat)",
-                        METHOD_GLS_BROWSER: "Browser OAuth GLS (diagnostic)",
                     }
                 )
             }
@@ -544,7 +549,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_GLS],
                         **token_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return await self._async_create_or_update_account_entry(COURIER_GLS, data, account_hint=email_value)
 
         schema = vol.Schema(
             {
@@ -588,7 +593,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENABLED_COURIERS: [COURIER_GLS],
                         **token_data,
                     }
-                    return self.async_create_entry(title=self._entry_title, data=data)
+                    return await self._async_create_or_update_account_entry(COURIER_GLS, data)
 
         schema = vol.Schema(
             {
@@ -899,7 +904,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_COURIER
             and str(entry.data.get(CONF_COURIER, "")) == COURIER_SAMEDAY
         )
-        if sameday_count:
+        if sameday_count and self._entry_title == COURIER_NAMES[COURIER_SAMEDAY]:
             self._entry_title = f"{COURIER_NAMES[COURIER_SAMEDAY]} {sameday_count + 1}"
             data[CONF_INSTANCE_NAME] = self._entry_title
 
@@ -927,17 +932,54 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
         if data.get(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT) is None:
             data.pop(CONF_CARGUS_REFRESH_TOKEN_EXPIRES_AT, None)
-        return self._async_create_or_update_cargus_entry(data)
+        return await self._async_create_or_update_account_entry(COURIER_CARGUS, data)
 
-    def _async_create_or_update_cargus_entry(self, data: dict[str, Any]) -> FlowResult:
-        """Creeaza intrarea Cargus sau finalizeaza reautentificarea existenta."""
+    async def _async_create_or_update_account_entry(
+        self, courier: str, data: dict[str, Any], account_hint: str = ""
+    ) -> FlowResult:
+        """Creeaza un cont distinct sau reconecteaza aceeasi intrare existenta."""
 
-        if self._reauth_entry is not None:
+        identity = identify_account(courier, data, account_hint)
+        if not identity.account_id:
+            return self.async_abort(reason="cannot_identify_courier_account")
+
+        current = self._reauth_entry
+        if current is not None:
+            previous = identify_account(courier, dict(current.data))
+            if not previous.account_id or not same_account(previous, identity):
+                return self.async_abort(reason="wrong_account")
+
+        for entry in self._async_current_entries():
+            if current is not None and entry.entry_id == current.entry_id:
+                continue
+            if str(entry.data.get(CONF_COURIER, "")) != courier:
+                continue
+            if same_account(identify_account(courier, dict(entry.data)), identity):
+                return self.async_abort(reason="already_configured")
+
+        data[CONF_ACCOUNT_ALIASES] = sorted(identity.aliases)
+        # Pastreaza identificatorul salvat, inclusiv pentru intrarile vechi.
+        data[CONF_ACCOUNT_ID] = (
+            str(current.data.get(CONF_ACCOUNT_ID) or identity.account_id)
+            if current is not None else identity.account_id
+        )
+        if current is not None:
+            data[CONF_INSTANCE_NAME] = str(current.data.get(CONF_INSTANCE_NAME) or current.title)
             return self.async_update_reload_and_abort(
-                self._reauth_entry,
+                current,
                 data_updates=data,
                 reason="reauth_successful",
             )
+
+        await self.async_set_unique_id(f"{DOMAIN}_{courier}_{identity.account_id}")
+        self._abort_if_unique_id_configured()
+        existing_titles = {entry.title for entry in self._async_current_entries()}
+        base_title = self._entry_title
+        suffix = 2
+        while self._entry_title in existing_titles:
+            self._entry_title = f"{base_title} {suffix}"
+            suffix += 1
+        data[CONF_INSTANCE_NAME] = self._entry_title
         return self.async_create_entry(title=self._entry_title, data=data)
 
     async def _async_create_cargus_from_refresh_token(self, refresh_token: str) -> FlowResult:
@@ -1057,7 +1099,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return code
 
 
-    async def _async_validate_fan_login(self, username: str, password: str, api_key: str) -> None:
+    async def _async_validate_fan_login(self, username: str, password: str, api_key: str) -> str:
         """Valideaza datele FAN Courier fara sa salveze tokenurile in config entry."""
 
         session = async_get_clientsession(self.hass)
@@ -1079,7 +1121,7 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             payload = await response.json(content_type=None)
 
         data = payload.get("data") if isinstance(payload, dict) else None
-        if payload.get("status") != "success" or not isinstance(data, dict) or not data.get("token"):
+        if not isinstance(payload, dict) or payload.get("status") != "success" or not isinstance(data, dict) or not data.get("token"):
             raise ValueError("invalid_auth_fan")
 
         # Loginul returneaza userId, dar endpointurile AWB folosesc clientId-ul
@@ -1097,10 +1139,14 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             branches_payload = await response.json(content_type=None)
 
         branches = branches_payload.get("data") if isinstance(branches_payload, dict) else None
-        if branches_payload.get("status") != "success" or not isinstance(branches, list):
+        if not isinstance(branches_payload, dict) or branches_payload.get("status") != "success" or not isinstance(branches, list):
             raise ValueError("cannot_connect_fan")
         if not any(isinstance(branch, dict) and branch.get("id") for branch in branches):
             raise ValueError("cannot_connect_fan")
+        user_id = data.get("userId")
+        if isinstance(user_id, bool) or not isinstance(user_id, (str, int)) or not str(user_id).strip():
+            raise ValueError("cannot_identify_courier_account")
+        return str(user_id).strip()
 
 
 
@@ -1174,8 +1220,10 @@ class CurieriRomaniaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         session = async_get_clientsession(self.hass)
         try:
             token_payload = await async_refresh_gls_token(session, refresh_token)
-        except Exception as err:
+        except CourierProviderAuthError as err:
             raise ValueError("invalid_auth_gls") from err
+        except CourierProviderError as err:
+            raise ValueError("cannot_connect_gls") from err
 
         access_token = str(token_payload.get("access_token", "")).strip()
         new_refresh_token = str(token_payload.get("refresh_token") or refresh_token).strip()

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+import hashlib
+import time
 import logging
 from typing import Any
 
@@ -11,6 +14,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    CONF_ENTRY_TYPE,
+    ENTRY_TYPE_COURIER,
     CONF_NOTIFICATIONS_ENABLED,
     CONF_NOTIFY_DELIVERED,
     CONF_NOTIFY_NEW_PARCEL,
@@ -24,6 +29,7 @@ from .const import (
     SIGNAL_NOTIFICATION_SETTINGS_UPDATED,
 )
 from .models import Parcel, ParcelSnapshot
+from .notification_routes import PERSISTENT_TARGET, route_targets
 from .status import NormalizedStatus
 from .storage import CurieriRomaniaNotificationSettingsStore, CurieriRomaniaNotificationStore
 
@@ -76,63 +82,52 @@ async def _async_send_notification(
     notification_id: str,
     *,
     force_persistent: bool = False,
-) -> None:
-    """Trimite notificarea catre serviciul configurat sau persistent notification."""
+    targets: list[str] | None = None,
+) -> set[str]:
+    """Trimite independent la fiecare destinatie; raporteaza succesul real."""
 
-    settings = await CurieriRomaniaNotificationSettingsStore(hass).async_get_settings()
-    service_name = str(settings.get(CONF_NOTIFY_SERVICE, "") or "").strip()
-    service_parts = _service_parts(service_name)
-
-    if service_parts and not force_persistent:
-        domain, service = service_parts
+    if targets is None:
+        settings = await CurieriRomaniaNotificationSettingsStore(hass).async_get_settings()
+        targets = route_targets(settings)
+    if force_persistent:
+        targets = [PERSISTENT_TARGET]
+    successful: set[str] = set()
+    failed: list[str] = []
+    for target in dict.fromkeys(targets):
+        if target == PERSISTENT_TARGET:
+            persistent_notification.async_create(hass, message, title=title, notification_id=notification_id)
+            successful.add(target)
+            continue
+        parts = _service_parts(target)
+        if parts is None or parts[0] != "notify":
+            failed.append(target)
+            continue
         try:
-            await hass.services.async_call(
-                domain,
-                service,
-                {"title": title, "message": message},
-                blocking=True,
-            )
-            await _async_record_notification_diagnostic(
-                hass,
-                title=title,
-                target=service_name,
-                result="trimisa",
-            )
-            return
-        except Exception as err:  # pragma: no cover - protectie runtime HA
-            error = str(err)
-            _LOGGER.warning(
-                "Curieri Romania: serviciul de notificare %s nu a putut fi apelat, folosesc notificare persistenta: %s",
-                service_name,
-                err,
-            )
-            persistent_notification.async_create(
-                hass,
-                message,
-                title=title,
-                notification_id=notification_id,
-            )
-            await _async_record_notification_diagnostic(
-                hass,
-                title=title,
-                target="persistent_notification",
-                result=f"fallback dupa eroare la {service_name}",
-                error=error,
-            )
-            return
-
-    persistent_notification.async_create(
-        hass,
-        message,
-        title=title,
-        notification_id=notification_id,
-    )
+            async with asyncio.timeout(15):
+                if hass.services.has_service(*parts):
+                    await hass.services.async_call(*parts, {"title": title, "message": message}, blocking=True)
+                elif hass.states.get(target) is not None:
+                    await hass.services.async_call("notify", "send_message", {"entity_id": target, "title": title, "message": message}, blocking=True)
+                else:
+                    raise ValueError("Destinatia nu mai este disponibila.")
+            successful.add(target)
+        except Exception as err:  # Un telefon indisponibil nu blocheaza celelalte.
+            failed.append(target)
+            _LOGGER.warning("Curieri Romania: notificarea catre %s a esuat (%s).", target, type(err).__name__)
+    if failed:
+        # Nu include datele coletului in avertizarea comuna de eroare.
+        persistent_notification.async_create(
+            hass,
+            "O notificare nu a ajuns la toate telefoanele selectate. Verifica destinatiile din Setari Curieri Romania.",
+            title="Curieri Romania: telefon indisponibil",
+            notification_id=f"{DOMAIN}_notification_delivery_error",
+        )
     await _async_record_notification_diagnostic(
-        hass,
-        title=title,
-        target="persistent_notification",
-        result="trimisa",
+        hass, title=title, target=", ".join(targets) or "oprit",
+        result="trimisa" if not failed and successful else "partial" if successful else "esuata" if failed else "oprita",
+        error=("Destinatii indisponibile: " + ", ".join(failed)) if failed else "",
     )
+    return successful
 
 
 def _is_pickup_status(parcel: Parcel) -> bool:
@@ -312,63 +307,92 @@ def _should_notify_status_change(parcel: Parcel) -> bool:
 
 
 async def async_handle_parcel_notifications(
-    hass: HomeAssistant,
-    snapshot: ParcelSnapshot,
+    hass: HomeAssistant, snapshot: ParcelSnapshot, entry: Any = None,
 ) -> None:
-    """Proceseaza notificarile pentru colete noi si statusuri schimbate."""
+    """Serializeaza actualizarile, inclusiv deduplicarea intre conturi."""
+    lock = hass.data.setdefault(DOMAIN, {}).setdefault("notification_processing_lock", asyncio.Lock())
+    async with lock:
+        await _async_process_parcel_notifications(hass, snapshot, entry)
 
-    if not snapshot.parcels:
-        return
 
+async def _async_process_parcel_notifications(hass: HomeAssistant, snapshot: ParcelSnapshot, entry: Any) -> None:
     store = CurieriRomaniaNotificationStore(hass)
     settings = await CurieriRomaniaNotificationSettingsStore(hass).async_get_settings()
-    initialized = await store.async_is_initialized()
+    entry_id = str(getattr(entry, "entry_id", "") or "")
+    account_name = str(getattr(entry, "title", "") or "")
+    initialized = await store.async_is_initialized(entry_id)
+    targets = route_targets(settings, entry_id)
+    current_keys: set[str] = set()
 
     for parcel in snapshot.parcels:
         if not parcel.awb or not parcel.courier:
             continue
+        key = f"account:{entry_id}:{parcel.unique_key}" if entry_id else parcel.unique_key
+        current_keys.add(key)
+        current_keys.add("__delivery__" + hashlib.sha256(parcel.unique_key.encode()).hexdigest())
+        previous = await store.async_get_parcel_state(key)
+        # Migrare aditiva: foloseste ultimul status vechi, fara avalansa de alerte.
+        if previous is None and entry_id:
+            previous = await store.async_get_parcel_state(parcel.unique_key)
+        state = _parcel_state(parcel)
+        fingerprint = state["fingerprint"]
+        is_new = previous is None
+        changed = is_new or previous.get("fingerprint") != fingerprint
+        pending = previous.get("pending", {}) if previous and not changed else {}
+        pending = {target: value for target, value in pending.items() if isinstance(value, dict)} if isinstance(pending, dict) else {}
+        is_new_event = is_new if changed else bool(previous.get("event_is_new", False)) if previous else False
+        state["event_is_new"] = is_new_event
+        state["account_entry_id"] = entry_id
+        state["pending"] = {}
+        should_send = (changed or bool(pending)) and (initialized or previous is not None)
+        should_send = should_send and _should_send_for_settings(parcel, is_new=is_new_event, settings=settings)
+        should_send = should_send and (is_new_event or _should_notify_status_change(parcel))
+        if should_send and targets:
+            ledger_key = "__delivery__" + hashlib.sha256(parcel.unique_key.encode()).hexdigest()
+            current_keys.add(ledger_key)
+            ledger = await store.async_get_parcel_state(ledger_key) or {}
+            sent = ledger.get("sent", {})
+            sent = sent if isinstance(sent, dict) else {}
+            event_hash = hashlib.sha256(f"{fingerprint}|{state.get('last_update') or ''}".encode()).hexdigest()
+            now = time.time()
+            selected = []
+            for target in targets:
+                history = sent.pop(target, [])
+                history = history if isinstance(history, list) else []
+                history = [item for item in history if isinstance(item, dict) and isinstance(item.get("at"), (int, float)) and now - item["at"] < 7 * 86400][-16:]
+                sent[target] = history
+                if any(item.get("event") == event_hash for item in history):
+                    continue
+                if not changed and (target not in pending or now < float(pending[target].get("retry_at", 0))):
+                    if target in pending:
+                        state["pending"][target] = pending[target]
+                    continue
+                selected.append(target)
+            if selected:
+                title = f"Curieri Romania: colet nou - {parcel.courier}" if is_new_event else _status_title(parcel)
+                message = _build_message(parcel, is_new=is_new_event)
+                if account_name:
+                    message = f"Cont: {account_name}\n" + message
+                success = await _async_send_notification(hass, title, message, _notification_id(parcel, "new" if is_new_event else "status"), targets=selected)
+                for target in selected:
+                    if target in success:
+                        sent[target] = (sent.get(target, []) + [{"event": event_hash, "at": now}])[-16:]
+                    else:
+                        attempts = min(5, int(pending.get(target, {}).get("attempts", 0)) + 1)
+                        state["pending"][target] = {"attempts": attempts, "retry_at": now + min(3600, 300 * 2 ** (attempts - 1))}
+            # Limiteaza istoricul inclusiv cand au fost schimbate destinatiile.
+            ledger = {**_parcel_state(parcel), "sent": {target: sent[target] for target in list(sent)[-24:]}}
+            await store.async_set_parcel_state(ledger_key, ledger)
+        await store.async_set_parcel_state(key, state)
 
-        key = parcel.unique_key
-        current_state = _parcel_state(parcel)
-        previous_state = await store.async_get_parcel_state(key)
-
-        if not initialized:
-            await store.async_set_parcel_state(key, current_state)
-            continue
-
-        if previous_state is None:
-            if _should_send_for_settings(parcel, is_new=True, settings=settings):
-                await _async_send_notification(
-                    hass,
-                    f"Curieri Romania: colet nou - {parcel.courier}",
-                    _build_message(parcel, is_new=True),
-                    _notification_id(parcel, "new"),
-                )
-            await store.async_set_parcel_state(key, current_state)
-            continue
-
-        previous_fingerprint = str(previous_state.get("fingerprint", ""))
-        current_fingerprint = str(current_state.get("fingerprint", ""))
-        if previous_fingerprint != current_fingerprint and _should_notify_status_change(parcel):
-            if _should_send_for_settings(parcel, is_new=False, settings=settings):
-                await _async_send_notification(
-                    hass,
-                    _status_title(parcel),
-                    _build_message(parcel, is_new=False),
-                    _notification_id(parcel, "status"),
-                )
-
-        await store.async_set_parcel_state(key, current_state)
-
-    current_keys = {parcel.unique_key for parcel in snapshot.parcels if parcel.awb and parcel.courier}
-    cleanup = await store.async_cleanup(current_keys=current_keys)
+    active_sets = hass.data.setdefault(DOMAIN, {}).setdefault("notification_current_keys", {})
+    active_sets[entry_id] = current_keys
+    all_keys = set().union(*active_sets.values()) if active_sets else set()
+    cleanup = await store.async_cleanup(current_keys=all_keys)
     if cleanup.get("removed"):
-        _LOGGER.debug("Curieri Romania: au fost curatate %s stari vechi din istoricul notificarilor.", cleanup.get("removed"))
         async_dispatcher_send(hass, SIGNAL_NOTIFICATION_SETTINGS_UPDATED)
-
     if not initialized:
-        await store.async_mark_initialized()
-        _LOGGER.debug("Curieri Romania: prima scanare a coletelor a fost memorata fara notificari.")
+        await store.async_mark_initialized(entry_id)
 
 
 _TEST_PREFIX = "__test__"
@@ -388,17 +412,23 @@ def _test_notification_id(suffix: str) -> str:
     return f"{DOMAIN}_test_{suffix}"
 
 
-async def async_send_test_notification(hass: HomeAssistant) -> None:
+async def async_send_test_notification(hass: HomeAssistant, entry_id: str = "") -> None:
     """Trimite o notificare simpla de test."""
 
+    entry = hass.config_entries.async_get_entry(entry_id) if entry_id else None
+    if entry_id and (entry is None or entry.domain != DOMAIN or entry.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_COURIER):
+        raise ValueError("Contul selectat nu mai exista.")
+    settings = await CurieriRomaniaNotificationSettingsStore(hass).async_get_settings()
+    targets = route_targets(settings, entry_id)
     await _async_send_notification(
         hass,
-        "[TEST] Curieri Romania: notificare test",
+        f"[TEST] Curieri Romania: {entry.title if entry else 'notificare test'}",
         (
             "[TEST] Sistemul de notificari Curieri Romania functioneaza.\n\n"
             "Aceasta notificare nu foloseste date reale si nu modifica lista de colete."
         ),
         _test_notification_id("simple"),
+        targets=targets,
     )
 
 

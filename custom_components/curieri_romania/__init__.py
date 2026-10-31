@@ -21,7 +21,9 @@ from .const import (
     CONF_ENTRY_TYPE,
     DOMAIN,
     ENTRY_TYPE_ADMIN,
+    ENTRY_TYPE_COURIER,
     NAME,
+    VERSION,
     PLATFORMS,
     SERVICE_REFRESH_LICENSE_STATUS,
     SERVICE_RESET_TEST_NOTIFICATION_HISTORY,
@@ -39,7 +41,10 @@ _PANEL_REGISTERED = False
 _EXTERNAL_DONE_VIEW_REGISTERED = False
 _TOKEN_RESULT_VIEW_REGISTERED = False
 _PANEL_URL_PATH = "curieri_romania"
-_PANEL_STATIC_URL = "/curieri_romania_static/curieri-romania-panel.js"
+# Fiecare versiune are URL si custom element distincte. Un frontend deja
+# deschis nu poate reutiliza modulul sau constructorul unei versiuni anterioare.
+_PANEL_STATIC_URL = f"/curieri_romania_static/{VERSION}/curieri-romania-panel.js"
+_PANEL_COMPONENT_NAME = f"curieri-romania-panel-{VERSION.replace('.', '-')}"
 _HELPER_STATIC_PATHS = {
     "/curieri_romania_tools/cargus_refresh_token_helper.html": "tools/cargus_refresh_token_helper.html",
     "/curieri_romania_tools/sameday_refresh_token_helper.html": "tools/sameday_refresh_token_helper.html",
@@ -167,6 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _async_register_license_services(hass, entry)
     _async_register_notification_services(hass)
+    dispatcher_send(hass, SIGNAL_NOTIFICATION_SETTINGS_UPDATED)
     task = hass.async_create_task(_async_revalidate_license_non_blocking(hass, entry))
     entry.async_on_unload(task.cancel)
     return True
@@ -211,7 +217,7 @@ async def _async_register_dashboard_panel(hass: HomeAssistant) -> None:
             _LOGGER.warning("Panelul Curieri Romania nu a fost gasit: %s", panel_file)
             return
 
-        await _async_register_static_path(hass, _PANEL_STATIC_URL, str(panel_file))
+        await _async_register_static_path(hass, _PANEL_STATIC_URL, str(panel_file), cache_headers=False)
 
         base_path = Path(__file__).parent
         for url_path, relative_path in _HELPER_STATIC_PATHS.items():
@@ -233,12 +239,12 @@ async def _async_register_dashboard_panel(hass: HomeAssistant) -> None:
 
             result = panel_custom.async_register_panel(
                 hass,
-                webcomponent_name="curieri-romania-panel",
+                webcomponent_name=_PANEL_COMPONENT_NAME,
                 frontend_url_path=_PANEL_URL_PATH,
                 sidebar_title=NAME,
                 sidebar_icon="mdi:truck-delivery-outline",
                 module_url=_PANEL_STATIC_URL,
-                config={"domain": DOMAIN},
+                config={"domain": DOMAIN, "version": VERSION},
                 require_admin=False,
             )
             if inspect.isawaitable(result):
@@ -248,7 +254,9 @@ async def _async_register_dashboard_panel(hass: HomeAssistant) -> None:
             _LOGGER.warning("Panelul Curieri Romania nu a putut fi inregistrat: %s", err)
 
 
-async def _async_register_static_path(hass: HomeAssistant, url_path: str, file_path: str) -> None:
+async def _async_register_static_path(
+    hass: HomeAssistant, url_path: str, file_path: str, *, cache_headers: bool = True
+) -> None:
     """Inregistreaza fisierul frontend ca resursa statica."""
 
     try:
@@ -256,7 +264,7 @@ async def _async_register_static_path(hass: HomeAssistant, url_path: str, file_p
 
         register_async = getattr(hass.http, "async_register_static_paths", None)
         if register_async is not None:
-            await register_async([StaticPathConfig(url_path, file_path, True)])
+            await register_async([StaticPathConfig(url_path, file_path, cache_headers)])
             return
 
         # Compatibilitate stricta cu versiuni HA vechi, unde API-ul async nu
@@ -264,7 +272,7 @@ async def _async_register_static_path(hass: HomeAssistant, url_path: str, file_p
         # nou, deoarece aceasta a fost eliminata din Home Assistant modern.
         register_legacy = getattr(hass.http, "register_static_path", None)
         if register_legacy is not None:
-            result = register_legacy(url_path, file_path, True)
+            result = register_legacy(url_path, file_path, cache_headers)
             if inspect.isawaitable(result):
                 await result
             return
@@ -313,7 +321,7 @@ def _async_register_notification_services(hass: HomeAssistant) -> None:
 
         from .notify import async_send_test_notification
 
-        await async_send_test_notification(hass)
+        await async_send_test_notification(hass, str(call.data.get("account_entry_id") or ""))
 
     async def async_simulate_new_parcel_service(call: ServiceCall) -> None:
         """Simuleaza aparitia unui colet nou."""
@@ -342,11 +350,19 @@ def _async_register_notification_services(hass: HomeAssistant) -> None:
         from .storage import CurieriRomaniaNotificationSettingsStore
 
         updates = dict(call.data or {})
-        await CurieriRomaniaNotificationSettingsStore(hass).async_update_settings(updates)
+        entry_id = str(updates.get("account_entry_id") or "")
+        if entry_id:
+            target = hass.config_entries.async_get_entry(entry_id)
+            if target is None or target.domain != DOMAIN or target.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_COURIER:
+                raise HomeAssistantError("Contul de curier selectat nu mai exista.")
+        try:
+            await CurieriRomaniaNotificationSettingsStore(hass).async_update_settings(updates)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
         dispatcher_send(hass, SIGNAL_NOTIFICATION_SETTINGS_UPDATED)
 
     services = {
-        SERVICE_SEND_TEST_NOTIFICATION: (async_send_test_notification_service, None),
+        SERVICE_SEND_TEST_NOTIFICATION: (async_send_test_notification_service, vol.Schema({vol.Optional("account_entry_id"): str})),
         SERVICE_SIMULATE_NEW_PARCEL_NOTIFICATION: (async_simulate_new_parcel_service, None),
         SERVICE_SIMULATE_STATUS_CHANGE_NOTIFICATION: (async_simulate_status_change_service, None),
         SERVICE_RESET_TEST_NOTIFICATION_HISTORY: (async_reset_test_history_service, None),
@@ -356,6 +372,10 @@ def _async_register_notification_services(hass: HomeAssistant) -> None:
                 {
                     vol.Optional("notifications_enabled"): bool,
                     vol.Optional("notify_service"): str,
+                    vol.Optional("notify_service_2"): str,
+                    vol.Optional("notify_service_3"): str,
+                    vol.Optional("account_entry_id"): str,
+                    vol.Optional("notify_mode"): vol.In(["inherit", "custom", "disabled"]),
                     vol.Optional("notify_new_parcel"): bool,
                     vol.Optional("notify_status_change"): bool,
                     vol.Optional("notify_out_for_delivery"): bool,

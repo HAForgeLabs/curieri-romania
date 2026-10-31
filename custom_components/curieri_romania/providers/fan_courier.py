@@ -21,7 +21,7 @@ from ..const import (
 )
 from ..models import Parcel, ParcelDirection, ParcelEvent
 from ..status import NormalizedStatus, normalize_fan_status
-from .base import CourierProvider, CourierProviderError
+from .base import CourierProvider, CourierProviderAuthError, CourierProviderError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ class FanCourierProvider(CourierProvider):
                 json={"username": username, "password": password},
             ) as response:
                 if response.status in (400, 401, 403):
-                    raise CourierProviderError("Autentificare FAN Courier esuata.")
+                    raise CourierProviderAuthError("Autentificare FAN Courier expirata. Reconecteaza contul.")
                 if response.status >= 400:
                     raise CourierProviderError(f"FAN Courier login HTTP {response.status}.")
                 payload = await response.json(content_type=None)
@@ -152,7 +152,7 @@ class FanCourierProvider(CourierProvider):
             raise CourierProviderError("FAN Courier nu poate fi contactat momentan.") from err
 
         if payload.get("status") != "success":
-            raise CourierProviderError("FAN Courier a respins autentificarea.")
+            raise CourierProviderAuthError("Autentificare FAN Courier expirata. Reconecteaza contul.")
 
         data = payload.get("data") or {}
         token = data.get("token")

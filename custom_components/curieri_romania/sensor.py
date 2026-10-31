@@ -312,10 +312,27 @@ class CurieriRomaniaNotificationSettingSensor(SensorEntity):
 
         await self._async_refresh_value()
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return getattr(self, "_routing_attributes", {})
+
     async def _async_refresh_value(self) -> None:
         """Citeste setarea din storage."""
 
         settings = await CurieriRomaniaNotificationSettingsStore(self.hass).async_get_settings()
+        self._routing_attributes = {}
+        if self._key == "notifications_enabled":
+            routes = settings.get("account_routes", {})
+            self._routing_attributes = {
+                "notify_service_2": settings.get("notify_service_2", ""),
+                "notify_service_3": settings.get("notify_service_3", ""),
+                "notification_accounts": [
+                    {"entry_id": entry.entry_id, "name": entry.title,
+                     **routes.get(entry.entry_id, {"mode": "inherit"})}
+                    for entry in self.hass.config_entries.async_entries(DOMAIN)
+                    if entry.data.get(CONF_ENTRY_TYPE) == "courier"
+                ],
+            }
         value = settings.get(self._key)
         if isinstance(value, bool):
             self._attr_native_value = "on" if value else "off"
@@ -492,6 +509,8 @@ class CurieriRomaniaParcelSensor(CoordinatorEntity[CurieriRomaniaCoordinator], S
 
         return {
             "display_name": _parcel_display_name(parcel),
+            "account_entry_id": self._entry.entry_id,
+            "account_name": self._entry.title,
             "awb": parcel.awb,
             "awb_short": _short_awb(parcel.awb),
             "courier": parcel.courier,

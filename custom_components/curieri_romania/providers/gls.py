@@ -21,7 +21,7 @@ from ..const import (
 )
 from ..models import Parcel, ParcelDirection, ParcelEvent
 from ..status import NormalizedStatus, normalize_gls_status
-from .base import CourierProvider, CourierProviderError
+from .base import CourierProvider, CourierProviderAuthError, CourierProviderError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,12 +72,16 @@ class GLSProvider(CourierProvider):
 
         try:
             raw_items.extend(await self._async_fetch_recently(token))
+        except CourierProviderAuthError:
+            raise
         except CourierProviderError as err:
             errors.append(f"recently:{err}")
 
         for direction in GLS_HISTORY_DIRECTIONS:
             try:
                 raw_items.extend(await self._async_fetch_history(token, direction=direction))
+            except CourierProviderAuthError:
+                raise
             except CourierProviderError as err:
                 errors.append(f"history:{direction}:{err}")
 
@@ -105,14 +109,14 @@ class GLSProvider(CourierProvider):
         )
         return parcels
 
-    async def _async_get_access_token(self) -> str:
+    async def _async_get_access_token(self, *, force_refresh: bool = False) -> str:
         """Returneaza un access token GLS valid, folosind refresh tokenul salvat."""
 
         refresh_token = str(self.entry.data.get(CONF_GLS_REFRESH_TOKEN, "")).strip()
         cached_token = _normalize_access_token(str(self.entry.data.get(CONF_GLS_ACCESS_TOKEN, "")).strip())
         expires_at = _safe_float(self.entry.data.get(CONF_GLS_TOKEN_EXPIRES_AT))
 
-        if cached_token and expires_at and expires_at > time.time() + GLS_TOKEN_REFRESH_MARGIN:
+        if not force_refresh and cached_token and expires_at and expires_at > time.time() + GLS_TOKEN_REFRESH_MARGIN:
             return cached_token
         if not refresh_token:
             return cached_token
@@ -120,7 +124,7 @@ class GLSProvider(CourierProvider):
         payload = await async_refresh_gls_token(self._session, refresh_token)
         access_token = _normalize_access_token(str(payload.get("access_token", "")).strip())
         if not access_token:
-            raise CourierProviderError("Autentificare GLS expirata. Reconecteaza contul.")
+            raise CourierProviderError("Raspuns GLS token invalid: lipseste access tokenul.")
 
         new_refresh_token = str(payload.get("refresh_token") or refresh_token).strip()
         expires_in = _safe_int(payload.get("expires_in"), 86400) or 86400
@@ -198,19 +202,30 @@ class GLSProvider(CourierProvider):
     ) -> Any:
         """Apeleaza API-ul GLS."""
 
-        headers = _build_headers(token)
+        # Foloseste tokenul deja reinnoit de un apel anterior din acelasi update.
+        token = _normalize_access_token(
+            str(self.entry.data.get(CONF_GLS_ACCESS_TOKEN) or token)
+        )
         try:
-            async with self._session.get(
-                f"{GLS_API_BASE}{path}",
-                headers=headers,
-                params=params,
-            ) as response:
-                if response.status in (401, 403):
-                    raise CourierProviderError("Autentificare GLS expirata. Reconecteaza contul.")
-                if response.status >= 400:
-                    raise CourierProviderError(f"HTTP {response.status}")
-                return await response.json(content_type=None)
-        except ClientError as err:
+            for attempt in range(2):
+                headers = _build_headers(token)
+                async with self._session.get(
+                    f"{GLS_API_BASE}{path}",
+                    headers=headers,
+                    params=params,
+                ) as response:
+                    if response.status == 401:
+                        if attempt or not self.entry.data.get(CONF_GLS_REFRESH_TOKEN):
+                            raise CourierProviderAuthError(
+                                "Autentificare GLS expirata. Reconecteaza contul."
+                            )
+                    elif response.status >= 400:
+                        raise CourierProviderError(f"HTTP {response.status}")
+                    else:
+                        return await response.json(content_type=None)
+                # Un access token expirat se reinnoieste o singura data.
+                token = await self._async_get_access_token(force_refresh=True)
+        except (ClientError, TimeoutError, ValueError) as err:
             raise CourierProviderError("GLS nu poate fi interogat momentan. Se va reincerca automat.") from err
 
     def _parse_parcel(self, item: dict[str, Any]) -> Parcel | None:
@@ -303,12 +318,23 @@ async def async_refresh_gls_token(session: Any, refresh_token: str) -> dict[str,
     }
     try:
         async with session.post(GLS_TOKEN_URL, data=payload, headers=headers) as response:
-            if response.status in (400, 401, 403):
-                raise CourierProviderError("Autentificare GLS esuata. Verifica refresh tokenul.")
+            if response.status in (401, 403):
+                raise CourierProviderAuthError(
+                    "Autentificare GLS expirata. Reconecteaza contul."
+                )
+            if response.status == 400:
+                error_payload = await response.json(content_type=None)
+                if isinstance(error_payload, dict) and error_payload.get("error") in {
+                    "invalid_grant", "invalid_token", "interaction_required", "login_required"
+                }:
+                    raise CourierProviderAuthError(
+                        "Autentificare GLS expirata. Reconecteaza contul."
+                    )
+                raise CourierProviderError("GLS token HTTP 400. Se va reincerca automat.")
             if response.status >= 400:
                 raise CourierProviderError(f"GLS token HTTP {response.status}")
             token_payload = await response.json(content_type=None)
-    except ClientError as err:
+    except (ClientError, TimeoutError, ValueError) as err:
         raise CourierProviderError("GLS nu poate fi contactat momentan.") from err
 
     if not isinstance(token_payload, dict):

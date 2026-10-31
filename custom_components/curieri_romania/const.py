@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "curieri_romania"
 NAME: Final = "Curieri Romania"
-VERSION: Final = "1.0.12"
+VERSION: Final = "1.0.15b3"
 
 PLATFORMS: Final = ["sensor", "button", "text"]
 
@@ -120,3 +120,8 @@ CONF_NOTIFY_PICKUP: Final = "notify_pickup"
 CONF_NOTIFY_DELIVERED: Final = "notify_delivered"
 CONF_NOTIFY_PROBLEMS: Final = "notify_problems"
 CONF_NOTIFY_RETURNED: Final = "notify_returned"
+
+# Identificatori de cont, separati de entry_id si de unique_id-urile entitatilor.
+CONF_ACCOUNT_ID: Final = "account_id"
+CONF_FAN_USER_ID: Final = "fan_user_id"
+CONF_ACCOUNT_ALIASES: Final = "account_aliases"

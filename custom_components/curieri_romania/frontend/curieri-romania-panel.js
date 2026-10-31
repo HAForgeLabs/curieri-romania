@@ -1,3 +1,6 @@
+const PANEL_VERSION = "1.0.15b3";
+const PANEL_ELEMENT_NAME = `curieri-romania-panel-${PANEL_VERSION.replaceAll(".", "-")}`;
+
 class CurieriRomaniaPanel extends HTMLElement {
   constructor() {
     super();
@@ -65,6 +68,7 @@ class CurieriRomaniaPanel extends HTMLElement {
     return Boolean(
       active.closest("form[data-form='license']") ||
       active.closest("form[data-form='notification-settings']") ||
+      active.closest("form[data-form='notification-account']") ||
       active.closest("form[data-form='exit-button-settings']") ||
       active.closest(".cr-toolbar")
     );
@@ -324,7 +328,11 @@ class CurieriRomaniaPanel extends HTMLElement {
   }
 
   _getNotificationSettings() {
+    const routing = this._notificationEntity("notificari_active")?.attributes || {};
     return {
+      accounts: Array.isArray(routing.notification_accounts) ? routing.notification_accounts : [],
+      notifyService2: routing.notify_service_2 || "",
+      notifyService3: routing.notify_service_3 || "",
       notificationsEnabled: this._notificationBool("notificari_active", true),
       notifyService: this._notificationValue("serviciu_notificare") === "-" ? "" : this._notificationValue("serviciu_notificare"),
       notifyNewParcel: this._notificationBool("notificari_colet_nou", true),
@@ -442,7 +450,7 @@ class CurieriRomaniaPanel extends HTMLElement {
 
     const notifyServices = this._hass?.services?.notify || {};
     Object.keys(notifyServices)
-      .filter((service) => service && !service.startsWith("_") && service !== "reload")
+      .filter((service) => service.startsWith("mobile_app_"))
       .sort((a, b) => a.localeCompare(b, "ro"))
       .forEach((service) => addOption(`notify.${service}`));
 
@@ -480,6 +488,8 @@ class CurieriRomaniaPanel extends HTMLElement {
         awb: state.attributes.awb || "",
         awbShort: state.attributes.awb_short || state.attributes.awb || "",
         courier: state.attributes.courier || "",
+        accountName: state.attributes.account_name || "",
+        accountEntryId: state.attributes.account_entry_id || "",
         direction: state.attributes.direction || "",
         originalStatus: state.attributes.original_status || "Necunoscut",
         sender: state.attributes.sender || "Necunoscut",
@@ -530,7 +540,7 @@ class CurieriRomaniaPanel extends HTMLElement {
   _searchableText(parcel) {
     return this._normalize([
       parcel.awb, parcel.awbShort, parcel.courier, parcel.status, parcel.originalStatus,
-      parcel.sender, parcel.recipient, parcel.location, parcel.lockerName, parcel.direction,
+      parcel.sender, parcel.recipient, parcel.location, parcel.lockerName, parcel.direction, parcel.accountName,
     ].filter(Boolean).join(" "));
   }
 
@@ -541,6 +551,7 @@ class CurieriRomaniaPanel extends HTMLElement {
     const sorters = {
       newest: byNewest,
       oldest: byOldest,
+      account: (a, b) => (a.accountName || "").localeCompare(b.accountName || "", "ro") || byNewest(a, b),
       courier: (a, b) => a.courier.localeCompare(b.courier) || byNewest(a, b),
       status: (a, b) => this._statusWeight(a) - this._statusWeight(b) || byNewest(a, b),
       awb: (a, b) => a.awb.localeCompare(b.awb) || byNewest(a, b),
@@ -712,6 +723,8 @@ class CurieriRomaniaPanel extends HTMLElement {
     const payload = {
       notifications_enabled: data.get("notifications_enabled") === "on",
       notify_service: String(data.get("notify_service") || "").trim(),
+      notify_service_2: String(data.get("notify_service_2") || "").trim(),
+      notify_service_3: String(data.get("notify_service_3") || "").trim(),
       notify_new_parcel: data.get("notify_new_parcel") === "on",
       notify_status_change: data.get("notify_status_change") === "on",
       notify_out_for_delivery: data.get("notify_out_for_delivery") === "on",
@@ -753,14 +766,14 @@ class CurieriRomaniaPanel extends HTMLElement {
   }
 
 
-  async _callNotificationTest(serviceName, busyKey, successMessage) {
+  async _callNotificationTest(serviceName, busyKey, successMessage, accountEntryId = "") {
     if (!this._hass || this._notificationTestBusy) return;
     try {
       this._notificationTestBusy = busyKey;
       this._notificationTestMessage = "Se trimite testul...";
       this._lastSignature = "";
       this._render();
-      await this._hass.callService("curieri_romania", serviceName, {});
+      await this._hass.callService("curieri_romania", serviceName, accountEntryId ? {account_entry_id: accountEntryId} : {});
       const sensorIds = this._notificationDiagnosticSensorIds();
       if (sensorIds.length) {
         try { await this._hass.callService("homeassistant", "update_entity", { entity_id: sensorIds }); } catch (_err) {}
@@ -798,13 +811,13 @@ class CurieriRomaniaPanel extends HTMLElement {
       <div class="cr-panel">
         <header class="cr-hero">
           <div class="cr-hero-main">
-            <div class="cr-logo"><img src="/curieri_romania_static/assets/curieri-romania-logo.png?v=1.0.12" alt="Curieri Romania"></div>
+            <div class="cr-logo"><img src="/curieri_romania_static/assets/curieri-romania-logo.png?v=${PANEL_VERSION}" alt="Curieri Romania"></div>
             <div>
               <h1>Curieri Romania</h1>
               <p>Monitorizare colete si statusuri curieri direct in Home Assistant.</p>
             </div>
             ${exitSettings.enabled ? `<button type="button" class="cr-exit-button" data-action="panel-exit" title="${this._escape(this._resolveExitUrl(exitSettings))}"><ha-icon icon="mdi:exit-to-app"></ha-icon><span>${this._escape(exitSettings.label || "Iesire")}</span></button>` : ""}
-            <a class="cr-hero-badge" href="https://haforgelabs.ro" target="_blank" rel="noopener noreferrer" title="Deschide HAForge Labs"><img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.12" alt="HAForge Labs"><span>HAForge Labs</span><small>v1.0.12</small></a>
+            <a class="cr-hero-badge" href="https://haforgelabs.ro" target="_blank" rel="noopener noreferrer" title="Deschide HAForge Labs"><img src="/curieri_romania_static/assets/haforge-logo.png?v=${PANEL_VERSION}" alt="HAForge Labs"><span>HAForge Labs</span><small>v${PANEL_VERSION} · BETA</small></a>
           </div>
           <aside class="cr-hero-side">
             ${this._sideMetric("Licenta", this._licenseShortStatus(license.status), this._licenseClass(license.status))}
@@ -889,6 +902,7 @@ class CurieriRomaniaPanel extends HTMLElement {
       newest: "cele mai noi",
       oldest: "cele mai vechi",
       courier: "curier",
+      account: "cont",
       status: "status important",
       awb: "AWB",
       sender: "expeditor",
@@ -906,6 +920,7 @@ class CurieriRomaniaPanel extends HTMLElement {
       ["newest", "Cele mai noi"],
       ["oldest", "Cele mai vechi"],
       ["courier", "Curier"],
+      ["account", "Cont"],
       ["status", "Status / prioritate"],
       ["ready", "Disponibile la ridicare"],
       ["active", "Active primele"],
@@ -922,7 +937,7 @@ class CurieriRomaniaPanel extends HTMLElement {
         </div>
         <label class="cr-search">
           <ha-icon icon="mdi:magnify"></ha-icon>
-          <input type="search" value="${this._escape(this._parcelSearch)}" placeholder="Cauta AWB, curier, status, expeditor..." />
+          <input type="search" value="${this._escape(this._parcelSearch)}" placeholder="Cauta AWB, curier, cont, status, expeditor..." />
         </label>
         <label class="cr-sort">
           <span>Sorteaza</span>
@@ -983,6 +998,7 @@ class CurieriRomaniaPanel extends HTMLElement {
     const groupers = {
       newest: (parcel) => this._monthGroup(parcel),
       oldest: (parcel) => this._monthGroup(parcel),
+      account: (parcel) => ({ key: parcel.accountEntryId || parcel.accountName || "necunoscut", title: parcel.accountName || "Cont necunoscut", meta: "Cont" }),
       courier: (parcel) => ({ key: this._normalize(parcel.courier || "Necunoscut"), title: parcel.courier || "Necunoscut", meta: "Curier" }),
       status: (parcel) => ({ key: String(this._statusWeight(parcel)).padStart(2, "0") + this._normalize(parcel.status || "Necunoscut"), title: parcel.status || "Necunoscut", meta: "Status" }),
       ready: (parcel) => {
@@ -1109,7 +1125,7 @@ class CurieriRomaniaPanel extends HTMLElement {
           <p>Informatii utile pentru suport, licente, raportare probleme si dezvoltarea integrarii Curieri Romania.</p>
         </div>
         <section class="cr-contact-hero">
-          <img src="/curieri_romania_static/assets/haforge-logo.png?v=1.0.12" alt="HAForge Labs">
+          <img src="/curieri_romania_static/assets/haforge-logo.png?v=${PANEL_VERSION}" alt="HAForge Labs">
           <div>
             <span>HAForge Labs</span>
             <h3>Curieri Romania pentru Home Assistant</h3>
@@ -1158,10 +1174,11 @@ class CurieriRomaniaPanel extends HTMLElement {
             <div>
               <span>Notificari</span>
               <h2>Setari notificari reale</h2>
-              <p>Alege ce notificari se trimit si, optional, serviciul mobil Home Assistant. Daca serviciul lipseste sau da eroare, integrarea foloseste notificari persistente.</p>
+              <p>Alege maximum 3 telefoane globale, apoi destinatiile fiecarui cont. Daca nu alegi niciun telefon, notificarea apare in Home Assistant. O eroare la un telefon nu blocheaza celelalte.</p>
             </div>
           </div>
           ${this._notificationSettingsForm(notificationSettings)}
+          ${this._accountNotificationForms(notificationSettings)}
           ${this._notificationSettingsMessage ? `<div class="cr-message">${this._escape(this._notificationSettingsMessage)}</div>` : ""}
         </section>
 
@@ -1297,7 +1314,7 @@ class CurieriRomaniaPanel extends HTMLElement {
       const clean = String(value || "").trim();
       return clean && clean !== "-" ? clean : "-";
     };
-    const service = settings.notifyService ? settings.notifyService : "persistent_notification";
+    const service = [settings.notifyService, settings.notifyService2, settings.notifyService3].filter(Boolean).join(", ") || "persistent_notification";
     const active = settings.notificationsEnabled ? "active" : "inactive";
     return `
       <section class="cr-diagnostic-panel">
@@ -1339,20 +1356,12 @@ class CurieriRomaniaPanel extends HTMLElement {
     const disabled = this._notificationSettingsBusy ? "disabled" : "";
     return `
       <form class="cr-notify-form" data-form="notification-settings">
-        <div class="cr-notify-main">
+        <div class="cr-notify-global">
           <label class="cr-switch-row">
             <input type="checkbox" name="notifications_enabled" ${checked(settings.notificationsEnabled)} ${disabled}>
             <span><strong>Notificari active</strong><small>Opreste toate notificarile reale fara sa afecteze testele sau memorarea statusurilor.</small></span>
           </label>
-          <label class="cr-field-row">
-            <span>Serviciu notificare mobil</span>
-            <select name="notify_service" ${disabled}>
-              ${this._getDetectedNotifyServices(settings.notifyService).map((option) => `
-                <option value="${this._escape(option.value)}" ${String(settings.notifyService || "") === option.value ? "selected" : ""}>${this._escape(option.label)}</option>
-              `).join("")}
-            </select>
-            <small>Alege un serviciu detectat automat sau lasa prima optiune pentru notificari persistente in Home Assistant.</small>
-          </label>
+          <div class="cr-phone-grid">${this._phoneSelectors([settings.notifyService, settings.notifyService2, settings.notifyService3])}</div>
         </div>
         <div class="cr-check-grid">
           ${this._notificationCheckbox("Colet nou", "notify_new_parcel", settings.notifyNewParcel, "Apare un AWB nou dupa prima scanare.", disabled)}
@@ -1368,6 +1377,84 @@ class CurieriRomaniaPanel extends HTMLElement {
         </div>
       </form>
     `;
+  }
+
+  _phoneSelectors(values = []) {
+    const fields = ["notify_service", "notify_service_2", "notify_service_3"];
+    return fields.map((field, index) => {
+      const current = String(values[index] || "");
+      const options = this._getDetectedNotifyServices(current);
+      return `<label class="cr-field-row"><span>Telefon ${index + 1}</span>
+        <select name="${field}" ${this._notificationSettingsBusy ? "disabled" : ""}>
+          ${options.map((option) => `<option value="${this._escape(option.value)}" ${current === option.value ? "selected" : ""}>${this._escape(option.value ? option.label : "Neselectat")}</option>`).join("")}
+        </select></label>`;
+    }).join("");
+  }
+
+  _notificationTargetLabel(target) {
+    if (!target) return "";
+    return this._hass?.states?.[target]?.attributes?.friendly_name || String(target).replace(/^notify\.(?:mobile_app_)?/, "").replaceAll("_", " ");
+  }
+
+  _accountRoutingHelp(mode, settings = this._getNotificationSettings()) {
+    if (mode === "disabled") return "Notificarile reale sunt oprite pentru acest cont.";
+    if (mode === "custom") return "Alege pana la 3 telefoane pentru acest cont. Daca toate raman neselectate, mesajul apare in Home Assistant.";
+    const phones = [...new Set([settings.notifyService, settings.notifyService2, settings.notifyService3].filter(Boolean))];
+    return phones.length ? `Destinatii globale: ${phones.map((phone) => this._notificationTargetLabel(phone)).join(", ")}.` : "Destinatie globala: notificari in Home Assistant. Nu sunt telefoane globale selectate.";
+  }
+
+  _accountNotificationForms(settings) {
+    const accounts = settings.accounts || [];
+    if (!accounts.length) return `<p class="cr-help">Adauga un cont de curier pentru a configura notificarile lui.</p>`;
+    const disabled = this._notificationSettingsBusy ? "disabled" : "";
+    const forms = accounts.map((account) => {
+      const mode = account.mode || "inherit";
+      return `<form class="cr-notify-form cr-account-notify-form" data-form="notification-account" data-entry="${this._escape(account.entry_id)}">
+        <div class="cr-account-notify-header"><span>Cont de curier</span><h3>${this._escape(account.name)}</h3></div>
+        <label class="cr-field-row cr-account-mode"><span>Destinatii pentru acest cont</span>
+          <select name="notify_mode" ${disabled}>
+            ${[["inherit", "Foloseste telefoanele globale"], ["custom", "Telefoane proprii"], ["disabled", "Notificari oprite"]].map(([value,label]) => `<option value="${value}" ${mode === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+        <p class="cr-account-route-help" data-route-help>${this._escape(this._accountRoutingHelp(mode, settings))}</p>
+        <div class="cr-phone-grid" data-account-phones ${mode === "custom" ? "" : "hidden"}>${this._phoneSelectors([account.notify_service, account.notify_service_2, account.notify_service_3])}</div>
+        <div class="cr-form-actions"><button class="cr-secondary-button" type="button" data-test-account="${this._escape(account.entry_id)}" ${disabled || mode === "disabled" ? "disabled" : ""}>Test pe acest cont</button><button type="submit" ${disabled}>Salveaza contul</button></div>
+      </form>`;
+    }).join("");
+    return `<div class="cr-section-head cr-account-notify-title"><div><h3>Notificari pe cont</h3><p>Foloseste destinatiile globale sau alege maximum 3 telefoane proprii. Salveaza modificarile inainte de test.</p></div></div><div class="cr-account-notify-list">${forms}</div>`;
+  }
+
+  _updateAccountNotificationMode(form) {
+    const mode = form.querySelector("select[name='notify_mode']")?.value || "inherit";
+    const phones = form.querySelector("[data-account-phones]");
+    const help = form.querySelector("[data-route-help]");
+    const test = form.querySelector("[data-test-account]");
+    if (phones) phones.hidden = mode !== "custom";
+    if (help) help.textContent = this._accountRoutingHelp(mode);
+    if (test) test.disabled = Boolean(this._notificationSettingsBusy) || mode === "disabled";
+    // Se modifica doar vizibilitatea: selectiile proprii raman in formular.
+  }
+
+  async _saveAccountNotificationSettings(form) {
+    if (!this._hass || this._notificationSettingsBusy) return;
+    const data = new FormData(form);
+    const payload = {account_entry_id: form.dataset.entry, notify_mode: String(data.get("notify_mode") || "inherit")};
+    for (const field of ["notify_service", "notify_service_2", "notify_service_3"]) payload[field] = String(data.get(field) || "").trim();
+    try {
+      this._notificationSettingsBusy = true;
+      this._notificationSettingsMessage = "Se salveaza contul...";
+      this._render();
+      await this._hass.callService("curieri_romania", "update_notification_settings", payload);
+      const id = this._entityId(this._notificationEntity("notificari_active"));
+      if (id) await this._hass.callService("homeassistant", "update_entity", {entity_id: id});
+      this._notificationSettingsMessage = "Destinatiile contului au fost salvate.";
+    } catch (error) {
+      this._notificationSettingsMessage = error?.message || "Nu am putut salva contul.";
+    } finally {
+      this._notificationSettingsBusy = false;
+      this._lastSignature = "";
+      this._render();
+    }
   }
 
   _notificationCheckbox(title, name, value, help, disabled) {
@@ -1449,6 +1536,13 @@ class CurieriRomaniaPanel extends HTMLElement {
       });
     }
 
+    for (const form of this.shadowRoot.querySelectorAll("form[data-form='notification-account']")) {
+      form.querySelector("select[name='notify_mode']")?.addEventListener("change", () => this._updateAccountNotificationMode(form));
+      form.addEventListener("submit", (event) => {event.preventDefault(); this._saveAccountNotificationSettings(form);});
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-test-account]")) {
+      button.addEventListener("click", () => this._callNotificationTest("send_test_notification", button.dataset.testAccount, "Testul contului a fost procesat. Verifica telefoanele si diagnosticul; un cont oprit nu trimite mesaje.", button.dataset.testAccount));
+    }
     const notificationForm = this.shadowRoot.querySelector("form[data-form='notification-settings']");
     if (notificationForm) {
       notificationForm.addEventListener("submit", (event) => {
@@ -1551,6 +1645,7 @@ class CurieriRomaniaPanel extends HTMLElement {
               <div class="top"><div><h2>Rezumat colet</h2><div class="drawer-subtitle mono">AWB: ${this._escape(parcel.awb)}</div></div><div class="cr-pill ${className}">${this._escape(parcel.status)}</div></div>
               <div class="detail-grid">
                 ${this._detailItem("Curier", parcel.courier)}
+                ${this._detailItem("Cont", parcel.accountName)}
                 ${this._detailItem("Directie", parcel.direction)}
                 ${this._detailItem("Expeditor", parcel.sender)}
                 ${this._detailItem("Destinatar", parcel.recipient)}
@@ -1592,6 +1687,7 @@ class CurieriRomaniaPanel extends HTMLElement {
         <div class="cr-parcel-top"><div><span>${this._escape(parcel.courier)}</span><strong>${this._escape(parcel.awbShort)}</strong></div><div class="cr-pill ${className}">${this._escape(parcel.status)}</div></div>
         <h3>${this._escape(title)}</h3>
         <div class="cr-lines">
+          ${parcel.accountName ? `<div><span>Cont</span><strong>${this._escape(parcel.accountName)}</strong></div>` : ""}
           <div><span>Locatie</span><strong>${this._escape(where)}</strong></div>
           <div><span>Ramburs</span><strong>${this._formatMoney(parcel.cod)}</strong></div>
           <div><span>PIN expira</span><strong>${this._escape(this._formatDate(parcel.pinExpiration))}</strong></div>
@@ -1624,8 +1720,29 @@ class CurieriRomaniaPanel extends HTMLElement {
       @media (prefers-color-scheme: light){.cr-field-row select{color-scheme:light}:host{--cr-bg:linear-gradient(135deg,#eaf6ff,#26a7bd);--cr-card:color-mix(in srgb,var(--card-background-color) 94%,#dff5fb 6%);--cr-shadow:0 18px 46px rgba(28,92,122,.16)}.cr-sort select{color-scheme:light}.cr-hero-main{color:#08324a}.cr-hero p{color:rgba(8,50,74,.76)}.cr-hero-badge{background:rgba(255,255,255,.84);color:#08324a;border-color:rgba(8,50,74,.12)}.cr-exit-button{background:rgba(255,255,255,.78);color:#08324a;border-color:rgba(8,50,74,.12)}.cr-logo{background:rgba(255,255,255,.78)}}
       @media (max-width:1050px){.cr-hero{grid-template-columns:1fr}.cr-hero-side{grid-template-columns:repeat(4,minmax(0,1fr))}.cr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cr-license-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cr-settings-grid,.cr-test-grid,.cr-diagnostic-grid,.cr-courier-diagnostic-grid,.cr-notify-main,.cr-check-grid{grid-template-columns:1fr}}
       @media (max-width:760px){.cr-form-actions button{width:100%;justify-content:center}.cr-toolbar{grid-template-columns:1fr}.cr-toolbar-info{white-space:normal}.cr-sort select{min-width:0}.cr-panel{padding:14px 10px 70px}.cr-hero-main{min-height:190px;padding:22px;display:block}.cr-logo{width:66px;height:66px}.cr-logo img{border-radius:20px}.cr-hero h1{font-size:34px}.cr-exit-button{right:12px;top:12px;min-height:38px;padding:0 12px}.cr-exit-button span{display:none}.cr-hero-badge{right:12px;bottom:12px;grid-template-columns:30px auto;padding:7px 10px 7px 7px;font-size:11px}.cr-hero-badge img{width:30px;height:30px;border-radius:8px}.cr-hero-side{grid-template-columns:1fr 1fr}.cr-side-card{padding:16px}.cr-side-card strong{font-size:24px}.cr-tabs{display:flex}.cr-tab{min-width:58px;padding:0 14px}.cr-tab span{display:none}.cr-page{padding:16px;border-radius:22px}.cr-kpis,.cr-license-grid,.cr-card-grid{grid-template-columns:1fr}.cr-form-card form{grid-template-columns:1fr}.cr-action-row,.cr-section-head{display:block}.cr-action-row button,.cr-section-head button,.cr-form-card button{width:100%;justify-content:center;margin-top:12px}.cr-group-header{display:block}.cr-group-header strong{display:block;margin-top:8px}.cr-settings-card{grid-template-columns:1fr}.cr-settings-card button{width:100%;justify-content:center}.cr-license-support,.cr-contact-hero,.cr-contact-card{display:block}.cr-license-support-icon,.cr-contact-icon{margin-bottom:12px}.cr-contact-grid{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}.detail-item:nth-child(2){border-top:1px solid var(--cr-line)}.drawer{width:100vw}.cr-license-hero{display:block}.cr-license-hero ha-icon{margin-top:14px}}
+
+      .cr-notify-form .cr-field-row{display:block;min-width:0}
+      .cr-notify-form .cr-field-row select{max-width:100%;min-width:0;text-overflow:ellipsis}
+      .cr-notify-global{display:grid;gap:14px;margin-bottom:16px}
+      .cr-phone-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;min-width:0}
+      .cr-phone-grid[hidden]{display:none!important}
+      .cr-account-notify-title{margin-top:28px;margin-bottom:16px}
+      .cr-account-notify-title h3{margin:0 0 6px;font-size:20px}
+      .cr-account-notify-title p{margin:0;color:var(--cr-muted);line-height:1.5}
+      .cr-account-notify-list{display:grid;gap:16px}
+      .cr-account-notify-form{display:grid;gap:16px;margin:0;padding:22px;min-width:0}
+      .cr-account-notify-header span{color:var(--cr-muted);font-size:12px;font-weight:800}
+      .cr-account-notify-header h3{margin:5px 0 0;font-size:18px;overflow-wrap:anywhere}
+      .cr-account-route-help{margin:0;color:var(--cr-muted);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+      .cr-account-notify-form .cr-form-actions{margin-top:0}
+      .cr-notify-form .cr-form-actions{gap:10px;flex-wrap:wrap}
+      .cr-notify-form .cr-form-actions .cr-secondary-button{background:transparent;color:var(--primary-text-color);border:1px solid var(--cr-accent)}
+      .cr-notify-form button:disabled{opacity:.5;cursor:default}
+      @media(max-width:760px){.cr-phone-grid{grid-template-columns:minmax(0,1fr)}.cr-account-notify-form{padding:16px}.cr-notify-form .cr-form-actions{flex-direction:column}.cr-notify-form .cr-form-actions button{width:100%;margin:0}}
     `;
   }
 }
 
-customElements.define("curieri-romania-panel", CurieriRomaniaPanel);
+if (!customElements.get(PANEL_ELEMENT_NAME)) {
+  customElements.define(PANEL_ELEMENT_NAME, CurieriRomaniaPanel);
+}

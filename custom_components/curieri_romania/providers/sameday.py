@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
-import logging
 import time
 from typing import Any
 
@@ -23,7 +22,6 @@ from ..models import Parcel, ParcelDirection, ParcelEvent
 from ..status import NormalizedStatus, normalize_sameday_status
 from .base import CourierProvider, CourierProviderAuthError, CourierProviderError
 
-_LOGGER = logging.getLogger(__name__)
 
 SAMEDAY_IDENTITY_BASE = "https://identity.sameday.ro"
 SAMEDAY_API_BASE = "https://recipients.sameday.ro"
@@ -290,10 +288,8 @@ class SamedayProvider(CourierProvider):
                     self._debug_info["last_error"] = "http_401"
                     raise CourierProviderAuthError("Autentificare Sameday expirata. Reconecteaza contul.")
                 if response.status >= 400:
-                    text = await response.text()
-                    request_debug["body_preview"] = _mask_text(text[:120])
                     self._debug_info["last_error"] = f"http_{response.status}"
-                    raise CourierProviderError(f"Sameday a returnat HTTP {response.status}: {_mask_text(text[:120])}")
+                    raise CourierProviderError(f"Sameday a returnat HTTP {response.status}.")
                 data = await response.json(content_type=None)
         finally:
             self._debug_info.setdefault("requests", []).append(request_debug)
@@ -896,15 +892,6 @@ def _safe_debug_path(path: str) -> str:
         _, query = suffix.split("?", 1)
         return f"{prefix}/api/awbs/***?{query}"
     return f"{prefix}/api/awbs/***"
-
-
-def _mask_text(text: str) -> str:
-    """Reduce riscul de expunere date personale in mesaje de eroare."""
-
-    if not text:
-        return text
-    masked = text.replace("Bearer ", "Bearer ***")
-    return masked[:120]
 
 
 def _count_statuses(parcels: list[Parcel]) -> dict[str, int]:

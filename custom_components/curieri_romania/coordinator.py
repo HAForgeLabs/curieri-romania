@@ -47,6 +47,7 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
             hass,
             _LOGGER,
             name=DOMAIN,
+            config_entry=entry,
             update_interval=(
                 CARGUS_MAINTENANCE_INTERVAL
                 if COURIER_CARGUS in entry.data.get(CONF_ENABLED_COURIERS, [])
@@ -152,7 +153,7 @@ class CurieriRomaniaCoordinator(DataUpdateCoordinator[ParcelSnapshot]):
         )
 
         try:
-            await async_handle_parcel_notifications(self.hass, snapshot)
+            await async_handle_parcel_notifications(self.hass, snapshot, self.entry)
         except Exception as err:  # pragma: no cover - protectie runtime HA
             _LOGGER.debug("Curieri Romania: verificarea notificarilor a esuat: %s", err)
 
